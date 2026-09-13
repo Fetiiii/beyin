@@ -386,7 +386,11 @@ Kural: uydurma, dokumde gecmeyen sey yazma, bos alanlari bos dizi birak.
 
 "curutulmus_hipotezler" akademik degeri olan kayit — bir hipotez BU OTURUMDA
 test edilip reddedildiyse mutlaka yaz, yumusatma.
-"kim": hipotezi ilk kim one surdu (kullanicinin kendi iddiasi mi, ajanin mi).
+"kim": ZORUNLU olarak su dortten BIRIYLE basla: kullanici | ajan | kaynak | bilinmiyor
+Istersen tire koyup detay ekle. Ornek: "ajan - §5 arama planlama asamasi",
+"kullanici - TASK-039 muzakereleri". Ilk kelime bu dortten biri degilse kayit
+gruplanamaz. "kullanici" = insanin kendi one surdugu iddia; bu isaret onemli,
+akademik durustlugun kaydi.
 "yerine": cürütülen iddianin yerine ne kondu. Konmadiysa bos birak.
 "neden_reddedildi": somut sayi ver. "basarisiz oldu" degil, "0/5000 gradient adimi".
 AMA: oturumda sadece ANILAN, hatirlatilan ya da ozetlenen ESKI bulgulari YAZMA.
