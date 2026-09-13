@@ -629,6 +629,11 @@ YIKICI_RE = _re_mod.compile(
     r"(>>?|\b(rm|mv|cp|truncate|dd|tee|shred|unlink|mkfs|rsync|install|chmod|chown)\b"
     r"|\bsed\b[^|;&]*-i)")
 
+# Komut metninden yol adayi cikarma. Glob desenleri METNIN TAMAMINDA degil,
+# sadece yol gorunumlu token'larda aranmali — yoksa "frozen" gibi bir kelime
+# icerikte gectigi icin alakasiz yazmalar engelleniyor.
+YOL_TOKEN_RE = _re_mod.compile(r"[~\w./\-@+]{2,}")
+
 # apply_patch / codex yama basliklari
 PATCH_RE = _re_mod.compile(
     r"\*\*\*\s+(?:Add|Update|Delete|Move to|Move from)\s+File:\s*(.+?)\s*$",
@@ -710,22 +715,26 @@ def komut_korunuyor_mu(cmd, desenler=None, cwd=None):
         if hit:
             return f"yama hedefi `{hedef.strip()}` korunan yolda ({hit})"
 
-    # 2) genel sezgisel
+    # 2) genel sezgisel — yikici islem VE yol gorunumlu bir token gerekir
     if not YIKICI_RE.search(c):
         return None
-    for d in desenler:
-        if d.startswith("/") or d.startswith("~"):
-            kisa = os.path.expanduser(d)
-            if kisa in c or d in c:
-                return d
-        elif "*" in d:
-            gövde = d.replace("*", "")
-            if gövde and gövde.lower() in c.lower():
-                return d
-        else:
-            if (f"/{d}/" in c or f"/{d} " in c or f"{d}/" in c
-                    or c.rstrip().endswith("/" + d)):
-                return d
+
+    glob_desenler = [d for d in desenler if "*" in d]
+    yol_desenler  = [d for d in desenler if "*" not in d]
+
+    for tok in set(YOL_TOKEN_RE.findall(c)):
+        yol_gibi = ("/" in tok) or ("." in tok and not tok.startswith("."))
+        # Cıplak kelime (ornegin "frozen", "data") sadece klasor/ad desenleriyle
+        # eslesebilir; glob'lar yalnizca dosya gorunumlu token'lara uygulanir.
+        uygulanacak = (glob_desenler + yol_desenler) if yol_gibi else yol_desenler
+        if not uygulanacak:
+            continue
+        aday = tok
+        if cwd and not os.path.isabs(aday) and not aday.startswith("~"):
+            aday = os.path.join(cwd, aday)
+        hit = yol_korunuyor_mu(aday, uygulanacak)
+        if hit:
+            return f"`{tok}` korunan yolda ({hit})"
     return None
 
 
@@ -749,13 +758,15 @@ def guard_karari(ev):
             if hit:
                 return f"`{inp.get(k)}` korunan yol ({hit})"
 
-    for k in ("command", "cmd", "script", "input", "patch", "content"):
+    # NOT: "content" bilerek yok — dosya icerigi komut degildir. Yazma hedefi
+    # zaten file_path ile (mekanizma 1) kontrol ediliyor.
+    for k in ("command", "cmd", "script", "input", "patch"):
         v = inp.get(k)
         if isinstance(v, list):
             v = " ".join(str(x) for x in v)
         hit = komut_korunuyor_mu(v, desenler, cwd)
         if hit:
-            if hit.startswith("yama hedefi"):
+            if hit.startswith("yama hedefi") or hit.startswith("`"):
                 return hit
             return f"komut korunan yola ({hit}) yikici islem uyguluyor"
     return None
