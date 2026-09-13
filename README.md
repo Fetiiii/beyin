@@ -236,7 +236,22 @@ beyin hipotez-ekle <proje> ...  çürütülmüş hipotezi elle kaydet
 beyin skill-bagla <isim>        skill'i iki harness'a da bağla
 beyin derle                     markdown görünümünü yenile
 beyin doktor                    tanı
+beyin yayinla [--kuru]          kodu yayın deposuna taşı (önce sızıntı tarar)
 ```
+
+### `beyin yayinla` hakkında
+
+Bu repo ile senin kendi `~/beyin`'in **iki ayrı depo.** Kasıtlı: hafıza deposu
+proje adlarını, kararları, yayınlanmamış bulguları tutar; yayın deposu sadece
+kodu. Aralarındaki köprü bu komut.
+
+Tarama terimlerini elle yazmazsın — kendi verinden türetilir: proje
+anahtarları, diskteki gerçek klasör adları, ev yolun, git e-postaların.
+Yeni bir proje eklediğin gün liste kendini günceller. Kaynak kirliyse
+kopyalama hiç yapılmaz.
+
+`ayarlar.md > Yayin taramasi` ile terim eklersin; `- !kelime` yanlış
+pozitifleri eler.
 
 ---
 
