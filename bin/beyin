@@ -1,0 +1,170 @@
+#!/usr/bin/env python3
+"""beyin — hafizayi sorgulama araci.
+
+  beyin durum                    tum projeler, tek tablo
+  beyin gecmis  <proje> [n]      son n oturum ozeti
+  beyin karar   <proje> [n]      kararlar (yeniden eskiye)
+  beyin hipotez <proje> [n]      curutulmus hipotezler
+  beyin ara     <kelime>         her seyde ara
+  beyin baglam  <proje>          SessionStart'ta enjekte edilen metni goster
+  beyin devir   <proje>          devam eden oturumdan devir notu uret
+  beyin canli                    su an calisan oturumlar
+  beyin derle                    markdown gorunumu yeniden uret
+  beyin doktor                   tani
+  beyin skill-bagla <isim>       skill'i iki harness'a da bagla
+  beyin gorevlendir <proje> "<gorev>"   alt ajani o projede calistir
+  beyin hipotez-ekle <proje> ...   curutulmus hipotezi elle kaydet
+"""
+import sys, os, json
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from beyin_lib import load_sessions, project_stats, build_context
+
+W = 100
+
+
+def wrap(s, indent=6):
+    s = " ".join(str(s).split())
+    out, line = [], ""
+    for w in s.split():
+        if len(line) + len(w) + 1 > W - indent:
+            out.append(line); line = w
+        else:
+            line = (line + " " + w).strip()
+    if line:
+        out.append(line)
+    return ("\n" + " " * indent).join(out)
+
+
+def cmd_durum():
+    rows = load_sessions()
+    projs = sorted({r["project"] for r in rows})
+    print(f"{'proje':32} {'oturum':>7} {'karar':>7} {'hipotez':>8}  son")
+    print("-" * 78)
+    for p in projs:
+        st = project_stats(p)
+        son = ((st["son"] or {}).get("session_ts") or (st["son"] or {}).get("ts") or "")[:10]
+        print(f"{p:32} {st['oturum']:7} {st['karar']:7} {st['hipotez']:8}  {son}")
+
+
+def cmd_gecmis(proj, n=5):
+    for r in load_sessions(proj)[-n:][::-1]:
+        print(f"\n── {(r.get('session_ts') or r.get('ts') or '')[:16]}  {r.get('harness')}  ({r.get('turns')} tur)")
+        print(f"   {wrap(r.get('ozet',''), 3)}")
+        for a in (r.get("acik_kalanlar") or [])[:5]:
+            print(f"   ! {wrap(a, 5)}")
+
+
+def cmd_karar(proj, n=20):
+    items = [((r.get("session_ts") or r.get("ts") or "")[:10], k) for r in load_sessions(proj)
+             for k in (r.get("kararlar") or [])][::-1][:n]
+    print(f"{proj}: {len(items)} karar gosteriliyor\n")
+    for ts, k in items:
+        print(f"[{ts}] {wrap(k.get('karar',''), 13)}")
+        if k.get("gerekce"):
+            print(f"        neden: {wrap(k['gerekce'], 15)}")
+        if k.get("kanit"):
+            print(f"        kanit: {k['kanit']}")
+        print()
+
+
+def cmd_hipotez(proj, n=20):
+    items = [((r.get("session_ts") or r.get("ts") or "")[:10], h) for r in load_sessions(proj)
+             for h in (r.get("curutulmus_hipotezler") or [])][::-1][:n]
+    st = project_stats(proj)
+    print(f"{proj}: {st['hipotez']} curutulmus hipotez, {len(items)} tanesi gosteriliyor\n")
+    for ts, h in items:
+        print(f"[{ts}] IDDIA : {wrap(h.get('iddia',''), 15)}")
+        if h.get("nasil_test_edildi"):
+            print(f"        TEST  : {wrap(h['nasil_test_edildi'], 15)}")
+        print(f"        RED   : {wrap(h.get('neden_reddedildi',''), 15)}")
+        if h.get("kanit"):
+            print(f"        KANIT : {h['kanit']}")
+        print()
+
+
+def cmd_ara(kelime):
+    k = kelime.lower()
+    n = 0
+    for r in load_sessions():
+        blob = json.dumps(r, ensure_ascii=False).lower()
+        if k not in blob:
+            continue
+        hits = []
+        for kk in (r.get("kararlar") or []):
+            if k in json.dumps(kk, ensure_ascii=False).lower():
+                hits.append(("KARAR", kk.get("karar", "")))
+        for hh in (r.get("curutulmus_hipotezler") or []):
+            if k in json.dumps(hh, ensure_ascii=False).lower():
+                hits.append(("HIPOTEZ", hh.get("iddia", "")))
+        if not hits and k in (r.get("ozet", "") or "").lower():
+            hits.append(("OZET", r.get("ozet", "")))
+        for tag, txt in hits:
+            n += 1
+            print(f"[{r['project']:26}] {tag:8} {wrap(txt, 40)}")
+    print(f"\n{n} sonuc")
+
+
+def main():
+    a = sys.argv[1:]
+    if not a or a[0] in ("-h", "--help", "yardim"):
+        print(__doc__); return
+    c = a[0]
+    try:
+        if c == "durum":
+            cmd_durum()
+        elif c == "gecmis":
+            cmd_gecmis(a[1], int(a[2]) if len(a) > 2 else 5)
+        elif c == "karar":
+            cmd_karar(a[1], int(a[2]) if len(a) > 2 else 20)
+        elif c == "hipotez":
+            cmd_hipotez(a[1], int(a[2]) if len(a) > 2 else 20)
+        elif c == "ara":
+            cmd_ara(" ".join(a[1:]))
+        elif c == "hipotez-ekle":
+            os.execv(sys.executable, [sys.executable,
+                     os.path.join(os.path.dirname(os.path.abspath(__file__)), "beyin-hipotez-ekle")] + a[1:])
+        elif c == "gorevlendir":
+            os.execv(sys.executable, [sys.executable,
+                     os.path.join(os.path.dirname(os.path.abspath(__file__)), "beyin-gorevlendir")] + a[1:])
+        elif c == "devir":
+            os.execv(sys.executable, [sys.executable,
+                     os.path.join(os.path.dirname(os.path.abspath(__file__)), "beyin-devir"), a[1]])
+        elif c == "canli":
+            from beyin_lib import live_sessions, load_sessions
+            projs = sorted({r["project"] for r in load_sessions()})
+            hic = True
+            for pr in projs:
+                for k in live_sessions(pr):
+                    hic = False
+                    son = (k.get("istemler") or [{}])[-1].get("metin", "")
+                    print(f"{pr:26} {k.get('harness'):7} {(k.get('son_gorulme') or '')[11:16]}  {son[:50]}")
+            if hic:
+                print("canli oturum yok")
+        elif c in ("derle", "doktor"):
+            os.execv(sys.executable, [sys.executable,
+                     os.path.join(os.path.dirname(os.path.abspath(__file__)), "beyin-" + c)])
+        elif c == "skill-bagla":
+            ad = a[1]
+            src = os.path.expanduser(f"~/beyin/skills/{ad}")
+            if not os.path.isdir(src):
+                print(f"yok: {src}"); return
+            for hedef in ("~/.claude/skills", "~/.codex/skills"):
+                d = os.path.expanduser(hedef)
+                os.makedirs(d, exist_ok=True)
+                link = os.path.join(d, ad)
+                if os.path.islink(link) or os.path.exists(link):
+                    os.remove(link)
+                os.symlink(src, link)
+                print(f"  {link} -> {src}")
+            print("iki harness da gorecek.")
+        elif c == "baglam":
+            print(build_context(a[1]) or "(bu proje icin enjeksiyon yok)")
+        else:
+            print(__doc__)
+    except IndexError:
+        print(__doc__)
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,65 @@
+#!/usr/bin/env python3
+"""beyin hipotez-ekle — curutulmus hipotezi elle store'a yaz.
+
+Skill'in kasitli yazma yolu. Ozetleyicinin otomatik cikardiklarindan farki:
+bu kayit insan onayindan gecmis, numarali ve alintilanabilir.
+"""
+import sys, os, time, argparse
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from beyin_lib import (SESSIONS, append_jsonl, load_sessions, project_key,
+                       proje_yolu, yankiyi_ele, blog)
+
+
+def main():
+    ap = argparse.ArgumentParser(prog="beyin hipotez-ekle")
+    ap.add_argument("proje")
+    ap.add_argument("--iddia", required=True)
+    ap.add_argument("--test", required=True, help="nasil test edildi")
+    ap.add_argument("--red", required=True, help="neden reddedildi (somut sayi)")
+    ap.add_argument("--kanit", required=True, help="dosya / bolum / deney kimligi")
+    ap.add_argument("--kim", default="bilinmiyor",
+                    choices=["kullanici", "ajan", "kaynak", "bilinmiyor"])
+    ap.add_argument("--yerine", default="")
+    ap.add_argument("--zorla", action="store_true", help="tekrar kontrolunu atla")
+    a = ap.parse_args()
+
+    if not proje_yolu(a.proje):
+        print(f"proje bulunamadi: {a.proje}  (bkz: beyin durum)")
+        return 1
+
+    # numara: bu projedeki mevcut kayit sayisi + 1, asla geri gitmez
+    mevcut = sum(len(r.get("curutulmus_hipotezler") or [])
+                 for r in load_sessions(a.proje))
+
+    h = {"no": mevcut + 1, "iddia": a.iddia, "kim": a.kim,
+         "nasil_test_edildi": a.test, "neden_reddedildi": a.red,
+         "yerine": a.yerine, "kanit": a.kanit}
+
+    rec = {"ts": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+           "session_ts": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+           "project": a.proje, "harness": "elle", "session": f"elle-{int(time.time())}",
+           "source": "skill", "ok": True, "turns": 0,
+           "ozet": f"Çürütme kaydı #{h['no']}: {a.iddia[:80]}",
+           "kararlar": [], "acik_kalanlar": [], "dokunulan_dosyalar": [],
+           "curutulmus_hipotezler": [h]}
+
+    if not a.zorla:
+        yankiyi_ele(a.proje, rec)
+        if not rec["curutulmus_hipotezler"]:
+            print("Bu iddia zaten kayıtlı. Görmek için:")
+            print(f"  ~/beyin/bin/beyin hipotez {a.proje}")
+            print("Yine de eklemek istersen: --zorla")
+            return 2
+
+    append_jsonl(SESSIONS, rec)
+    blog(f"HIPOTEZ-EKLE {a.proje} #{h['no']}", "skill.log")
+    print(f"✓ kaydedildi — {a.proje} #{h['no']}")
+    print(f"  iddia : {a.iddia}")
+    print(f"  yerine: {a.yerine or '(yok)'}")
+    print(f"  kanit : {a.kanit}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

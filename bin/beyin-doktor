@@ -1,0 +1,77 @@
+#!/usr/bin/env python3
+"""beyin doktor — tek tabloda tani."""
+import sys, os, json, time, subprocess
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from beyin_lib import BEYIN, STATE, STORE, EVENTS, SESSIONS, GRAPH, load_sessions, read_edges
+
+def satir(ad, ok, detay="", duzelt=""):
+    print(f"{'✅' if ok else '🔴'} {ad:34} {detay}")
+    if not ok and duzelt:
+        print(f"   → {duzelt}")
+
+def main():
+    H = os.path.expanduser("~")
+    print("── beyin doktor ──\n")
+
+    for n, p in (("hooks/claude.sh", f"{BEYIN}/hooks/claude.sh"),
+                 ("hooks/codex.sh",  f"{BEYIN}/hooks/codex.sh")):
+        satir(n, os.access(p, os.X_OK), "calistirilabilir" if os.access(p, os.X_OK) else "yok/izin",
+              f"chmod +x {p}")
+
+    cs = f"{H}/.claude/settings.json"
+    try:
+        hooks = json.load(open(cs)).get("hooks", {})
+        satir("Claude Code bagli", bool(hooks), f"{len(hooks)} olay",
+              "settings.json'a hooks blogu ekle")
+    except Exception as e:
+        satir("Claude Code bagli", False, str(e)[:40])
+
+    cx = f"{H}/.codex/hooks.json"
+    try:
+        n = len(json.load(open(cx)).get("hooks", {}))
+        satir("Codex bagli", n > 0, f"{n} olay")
+    except Exception as e:
+        satir("Codex bagli", False, str(e)[:40], f"{cx} yok")
+
+    try:
+        tr = open(f"{H}/.codex/config.toml").read().count("trusted_hash")
+        satir("Codex trust", tr > 0, f"{tr} hook onaylı",
+              "bir kez `codex` acip 'Trust all' de")
+    except Exception:
+        satir("Codex trust", False, "config.toml okunamadi")
+
+    ev = sum(1 for _ in open(EVENTS)) if os.path.exists(EVENTS) else 0
+    satir("olay akisi", True, f"{ev} olay")
+
+    rows = load_sessions()
+    satir("store", bool(rows), f"{len(rows)} oturum, "
+          f"{sum(len(r.get('kararlar') or []) for r in rows)} karar, "
+          f"{sum(len(r.get('curutulmus_hipotezler') or []) for r in rows)} hipotez")
+
+    satir("graph.md", os.path.exists(GRAPH), f"{len(read_edges())} kenar")
+
+    st = f"{STATE}/son-derleme"
+    if os.path.exists(st):
+        yas = (time.time() - float(open(st).read().strip())) / 3600
+        satir("derleme", yas < 24, f"{yas:.1f} saat once",
+              "~/beyin/bin/beyin-derle")
+    else:
+        satir("derleme", False, "hic calismadi", "~/beyin/bin/beyin-derle")
+
+    satir("Obsidian vault", os.path.isdir(f"{BEYIN}/.obsidian"), "~/beyin")
+
+    for c in ("claude", "codex"):
+        ok = subprocess.run(["which", c], capture_output=True).returncode == 0
+        satir(f"{c} CLI", ok, "PATH'te" if ok else "yok")
+
+    errs = f"{STATE}/capture-errors.log"
+    n = sum(1 for _ in open(errs)) if os.path.exists(errs) else 0
+    satir("yakalama hatalari", n == 0, f"{n} hata", f"bak: {errs}")
+
+    live = f"{STATE}/live"
+    n = sum(len(os.listdir(os.path.join(live, d))) for d in os.listdir(live)) if os.path.isdir(live) else 0
+    satir("canli oturum", True, f"{n} tane")
+
+if __name__ == "__main__":
+    main()

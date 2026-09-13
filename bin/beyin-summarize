@@ -1,0 +1,18 @@
+#!/usr/bin/env python3
+"""beyin summarize — arka plan. Cekirdek beyin_lib'de, burasi sadece tetikleyici."""
+import sys, os, json
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from beyin_lib import SESSIONS, append_jsonl, summarize_session, blog
+
+try:
+    ev = json.loads(sys.argv[1])
+    rec = summarize_session(ev, source="hook")
+    if rec is None:
+        blog(f"ATLANDI (kisa) proje={ev.get('project')}")
+    else:
+        append_jsonl(SESSIONS, rec)
+        blog(f"YAZILDI proje={rec['project']} ok={rec.get('ok')} by={rec.get('by')} turns={rec['turns']}")
+except Exception as e:
+    blog(f"FATAL {type(e).__name__}: {e}")
+sys.exit(0)

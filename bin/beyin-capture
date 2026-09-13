@@ -1,0 +1,139 @@
+#!/usr/bin/env python3
+"""beyin capture — hizli yol. 3 saniyeden once donmek ZORUNDA (Codex kirpiyor).
+
+Isi: olayi allowlist'ten gecir, JSONL'e yaz, gerekiyorsa ozetleyiciyi
+arka plana at ve HEMEN don. Asla beklemez, asla oturumu bozmaz.
+"""
+import sys, os, json, time, subprocess
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from beyin_lib import (EVENTS, STATE, project_key, append_jsonl, build_context,
+                       emit_context, touch_live, close_live, consume_devir,
+                       guard_karari, emit_deny)
+
+SUMMARIZE_ON = {"SessionEnd", "PreCompact"}
+INJECT_ON    = {"SessionStart", "SubagentStart"}
+GUARD_ON     = {"PreToolUse"}
+
+
+def main():
+    # K7 — ozyineleme kalkani: ozetleyicinin cagirdigi CLI de hook atesler.
+    if os.environ.get("BEYIN_NO_CAPTURE"):
+        return
+
+    harness = sys.argv[1] if len(sys.argv) > 1 else "?"
+    raw = sys.stdin.read() if not sys.stdin.isatty() else ""
+    try:
+        ev = json.loads(raw) if raw.strip() else {}
+    except Exception:
+        return
+
+    cwd   = ev.get("cwd")
+    proj  = project_key(cwd)
+    if proj is None:
+        return                                   # K2 — sessizce dus
+
+    event = ev.get("hook_event_name") or ev.get("hookEventName")
+
+    # PreToolUse: korunan yollara yazmayi engelle. Hizli yol — agir is yok.
+    if event in GUARD_ON:
+        sebep = guard_karari(ev)
+        if sebep:
+            emit_deny(sebep)
+            try:
+                with open(os.path.join(STATE, "engellenenler.log"), "a") as f:
+                    f.write(f"{time.strftime('%F %T')} [{harness}] {proj} {sebep}\n")
+            except Exception:
+                pass
+        return
+    rec = {
+        "ts": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+        "harness": harness,
+        "event": event,
+        "project": proj,
+        "session": ev.get("session_id"),
+        "cwd": cwd,
+        "transcript": ev.get("transcript_path"),
+    }
+    if event == "UserPromptSubmit":
+        p = (ev.get("prompt") or "")[:400]
+        if p:
+            rec["prompt"] = p
+    append_jsonl(EVENTS, rec)
+
+    # canli durum: her istemde tazele, oturum bitince sil
+    sid = rec.get("session")
+    if sid:
+        if event in ("SessionStart", "UserPromptSubmit"):
+            touch_live(proj, sid, harness, cwd, rec.get("prompt"), rec.get("transcript"))
+        elif event == "SessionEnd":
+            close_live(proj, sid)
+            consume_devir(proj, sid)
+
+    if event in SUMMARIZE_ON and rec["transcript"]:
+        spawn_summarizer(rec)
+
+    if event == "SessionEnd":
+        maybe_compile()
+
+    # PreCompact = baglam doluyor = uzun oturum. Devir notunu simdi uret,
+    # limit bitmesini beklemeden hazir olsun. Arka planda, kimse beklemez.
+    if event == "PreCompact":
+        spawn_devir(proj)
+
+    if event in INJECT_ON:
+        emit_context(event, build_context(proj, rec.get("session")))
+
+
+COMPILE_EVERY = 6 * 3600
+
+
+def maybe_compile():
+    """6 saatte bir, arka planda. Ozetleyici bitmeden calisirsa sonraki tur yakalar."""
+    stamp = os.path.join(STATE, "son-derleme")
+    try:
+        if os.path.exists(stamp) and time.time() - float(open(stamp).read().strip()) < COMPILE_EVERY:
+            return
+    except Exception:
+        pass
+    here = os.path.dirname(os.path.abspath(__file__))
+    subprocess.Popen([sys.executable, os.path.join(here, "beyin-derle")],
+                     stdin=subprocess.DEVNULL,
+                     stdout=open(os.path.join(STATE, "derle.log"), "a"),
+                     stderr=subprocess.STDOUT,
+                     start_new_session=True, cwd="/tmp",
+                     env=dict(os.environ, BEYIN_NO_CAPTURE="1"))
+
+
+def spawn_devir(proj):
+    here = os.path.dirname(os.path.abspath(__file__))
+    subprocess.Popen([sys.executable, os.path.join(here, "beyin-devir"), proj],
+                     stdin=subprocess.DEVNULL,
+                     stdout=open(os.path.join(STATE, "devir.log"), "a"),
+                     stderr=subprocess.STDOUT, start_new_session=True,
+                     cwd="/tmp", env=dict(os.environ, BEYIN_NO_CAPTURE="1"))
+
+
+def spawn_summarizer(rec):
+    """Kop ve don. Beklemek yok."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    env = dict(os.environ, BEYIN_NO_CAPTURE="1")
+    log = open(os.path.join(STATE, "summarize.log"), "a")
+    subprocess.Popen(
+        [sys.executable, os.path.join(here, "beyin-summarize"), json.dumps(rec)],
+        stdin=subprocess.DEVNULL, stdout=log, stderr=log,
+        start_new_session=True,                  # oturum olunce olmesin
+        cwd="/tmp", env=env,
+    )
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except Exception as e:
+        try:
+            with open(os.path.join(STATE, "capture-errors.log"), "a") as f:
+                f.write(f"{time.strftime('%F %T')} {type(e).__name__}: {e}\n")
+        except Exception:
+            pass
+    sys.exit(0)

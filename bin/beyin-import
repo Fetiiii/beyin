@@ -1,0 +1,116 @@
+#!/usr/bin/env python3
+"""beyin import — gecmis transcript'leri toplu ice al.
+
+~/.claude/projects/**/*.jsonl ve ~/.codex/sessions/**/*.jsonl dosyalarini tarar,
+allowlist'ten gecenleri ozetleyip store/sessions.jsonl'e yazar.
+Zaten iceri alinmis oturumu atlar (session id ile).
+"""
+import sys, os, json, glob, argparse
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from beyin_lib import (HOME, SESSIONS, project_key, append_jsonl,
+                       summarize_session, blog)
+
+LOG = "import.log"
+
+
+def peek_cwd(path, harness, maxlines=6):
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            for i, line in enumerate(f):
+                if i > maxlines:
+                    break
+                try:
+                    d = json.loads(line)
+                except Exception:
+                    continue
+                c = d.get("cwd") or (d.get("payload") or {}).get("cwd")
+                if c:
+                    return c
+    except Exception:
+        pass
+    return None
+
+
+def discover():
+    out = []
+    for path in glob.glob(os.path.join(HOME, ".claude/projects/*/*.jsonl")):
+        out.append(("claude", path))
+    for path in glob.glob(os.path.join(HOME, ".codex/sessions/**/*.jsonl"), recursive=True):
+        out.append(("codex", path))
+    jobs = []
+    for harness, path in out:
+        cwd = peek_cwd(path, harness)
+        pk = project_key(cwd) if cwd else None
+        if not pk:
+            continue
+        sid = os.path.basename(path).replace(".jsonl", "")
+        jobs.append({"harness": harness, "transcript": path, "project": pk,
+                     "session": sid, "cwd": cwd, "event": "import"})
+    return jobs
+
+
+def already_done():
+    done = set()
+    if os.path.exists(SESSIONS):
+        for line in open(SESSIONS, encoding="utf-8"):
+            try:
+                done.add(json.loads(line).get("session"))
+            except Exception:
+                pass
+    return done
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--workers", type=int, default=4)
+    ap.add_argument("--limit", type=int, default=0)
+    ap.add_argument("--dry-run", action="store_true")
+    a = ap.parse_args()
+
+    jobs = discover()
+    done = already_done()
+    todo = [j for j in jobs if j["session"] not in done]
+    n_have = len(jobs) - len(todo)
+    if a.limit:
+        todo = todo[:a.limit]
+
+    print(f"bulundu: {len(jobs)} | zaten var: {n_have} | islenecek: {len(todo)}")
+    by_proj = {}
+    for j in todo:
+        by_proj[j["project"]] = by_proj.get(j["project"], 0) + 1
+    for k, v in sorted(by_proj.items(), key=lambda x: -x[1]):
+        print(f"   {k:34} {v:3}")
+    if a.dry_run:
+        return
+
+    blog(f"IMPORT BASLADI {len(todo)} oturum, {a.workers} worker", LOG)
+    ok = skip = fail = 0
+    with ThreadPoolExecutor(max_workers=a.workers) as ex:
+        futs = {ex.submit(summarize_session, j, "import"): j for j in todo}
+        for i, fut in enumerate(as_completed(futs), 1):
+            j = futs[fut]
+            try:
+                rec = fut.result()
+            except Exception as e:
+                blog(f"HATA {j['session']}: {type(e).__name__}: {e}", LOG)
+                fail += 1
+                continue
+            if rec is None:
+                skip += 1
+                blog(f"[{i}/{len(todo)}] ATLANDI (kisa) {j['project']}", LOG)
+            else:
+                append_jsonl(SESSIONS, rec)
+                if rec.get("ok"):
+                    ok += 1
+                else:
+                    fail += 1
+                blog(f"[{i}/{len(todo)}] {j['project']:28} ok={rec.get('ok')} "
+                     f"by={rec.get('by')} turns={rec['turns']}", LOG)
+    blog(f"IMPORT BITTI ok={ok} atlandi={skip} hata={fail}", LOG)
+    print(f"bitti: ok={ok} atlandi={skip} hata={fail}")
+
+
+if __name__ == "__main__":
+    main()

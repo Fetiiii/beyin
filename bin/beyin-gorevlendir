@@ -1,0 +1,59 @@
+#!/usr/bin/env python3
+"""beyin gorevlendir — bir alt ajani hedef projede calistirir.
+
+Alt ajan o projenin klasorunde dogar, dolayisiyla SessionStart hook'u
+projenin hafizasini otomatik enjekte eder. Gorevi ayrica anlatmaya gerek yok.
+
+Yazma korumasi PreToolUse hook'uyla alt ajan icin de gecerlidir.
+"""
+import sys, os, subprocess, argparse, time
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from beyin_lib import proje_yolu, blog, korunan_desenler
+
+def main():
+    ap = argparse.ArgumentParser(prog="beyin gorevlendir")
+    ap.add_argument("proje")
+    ap.add_argument("gorev")
+    ap.add_argument("--sandbox", default="danger-full-access",
+                    choices=["read-only", "workspace-write", "danger-full-access"])
+    ap.add_argument("--harness", default="codex", choices=["codex", "claude"])
+    ap.add_argument("--sessiz", action="store_true")
+    a = ap.parse_args()
+
+    yol = proje_yolu(a.proje)
+    if not yol:
+        print(f"proje bulunamadi: {a.proje}")
+        print("mevcutlar icin: ~/beyin/bin/beyin durum")
+        return 1
+
+    env = dict(os.environ, BEYIN_ALT_AJAN=os.environ.get("CLAUDE_SESSION_ID", "cli"))
+    if a.harness == "codex":
+        cmd = ["codex", "exec", "--skip-git-repo-check",
+               "-s", a.sandbox, "-C", yol, a.gorev]
+    else:
+        cmd = ["claude", "-p", a.gorev]
+
+    if not a.sessiz:
+        print(f"── {a.proje} ({yol})")
+        print(f"   harness={a.harness} sandbox={a.sandbox}")
+        print(f"   korunan yollar: {', '.join(korunan_desenler())}\n")
+
+    t0 = time.time()
+    r = subprocess.run(cmd, cwd=yol, env=env, text=True,
+                       capture_output=True, stdin=subprocess.DEVNULL)
+    sure = time.time() - t0
+    blog(f"GOREVLENDIR {a.proje} sandbox={a.sandbox} rc={r.returncode} {sure:.0f}s", "gorevlendir.log")
+
+    out = "\n".join(l for l in (r.stdout or "").splitlines()
+                    if not any(x in l for x in ("rmcp::", "AuthRequired", "Transport channel")))
+    print(out.strip())
+    if r.returncode != 0:
+        print(f"\n[rc={r.returncode}] {(r.stderr or '')[:400]}")
+    if not a.sessiz:
+        print(f"\n── {sure:.0f} saniye")
+    return r.returncode
+
+
+if __name__ == "__main__":
+    sys.exit(main())

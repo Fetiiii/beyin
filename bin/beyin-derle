@@ -1,0 +1,180 @@
+#!/usr/bin/env python3
+"""beyin derle — store'u okunabilir markdown'a cevirir.
+
+Deterministik: LLM yok. Kayitlar zaten yapili JSON, render etmek saf kod isi.
+Boylece bedava, aninda, tekrarlanabilir ve uydurma riski sifir.
+
+Uretilenler (hepsi TURETILMIS — elle duzenleme, uzerine yazilir):
+  index.md               tum projeler
+  projeler/<proje>.md    proje dosyasi
+  hipotezler.md          butun curutulmus hipotezler (akademik varlik)
+"""
+import sys, os, json, time, difflib
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from beyin_lib import BEYIN, STATE, load_sessions, project_stats, edges_for, blog
+
+TAZE_GUN = 7          # bundan eski oturumun "acik isi" acik sayilmaz
+UYARI = ("> ⚠️ Bu dosya **derleyici tarafindan uretilir**. Elle duzenleme, "
+         "uzerine yazilir.\n> Elle yazilan tek dosya: [[graph]]\n")
+
+
+def gun_farki(ts):
+    try:
+        t = time.mktime(time.strptime((ts or "")[:10], "%Y-%m-%d"))
+        return (time.time() - t) / 86400
+    except Exception:
+        return 9999
+
+
+def tekille(items, key, esik=0.85):
+    """Yakin-tekrarlari birlestir. En ESKI kayit tutulur (ilk kesfedildigi an).
+
+    Gerekce: sistem kendi enjeksiyonunu yeniden yutabiliyor — ajan hafizadan
+    okuduklarini tekrarlayinca ozetleyici bunlari yeni bulgu sanabiliyor.
+    """
+    tutulan, atilan = [], 0
+    for it in items:
+        t = " ".join(str(key(it) or "").lower().split())
+        if not t:
+            continue
+        dup = False
+        for kt, _ in tutulan:
+            if difflib.SequenceMatcher(None, kt, t).ratio() > esik:
+                dup = True; break
+        if dup:
+            atilan += 1
+        else:
+            tutulan.append((t, it))
+    return [it for _, it in tutulan], atilan
+
+
+def yaz(path, text):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(text)
+
+
+def proje_dosyasi(proj):
+    rows = load_sessions(proj)
+    st = project_stats(proj)
+    son = st["son"] or {}
+    L = [f"# {proj}\n", UYARI]
+
+    tarih = (son.get("session_ts") or "")[:10]
+    L.append(f"\n**{st['oturum']} oturum · {st['karar']} karar · "
+             f"{st['hipotez']} curutulmus hipotez · son: {tarih}**\n")
+
+    edges = edges_for(proj)
+    if edges:
+        L.append("\n## Bagli projeler\n")
+        for other, e in edges:
+            L.append(f"- [[{other}]] — *{e['etiket']}*: {e['neden']}")
+            if e["kanit"]:
+                L.append(f"  - kanit: {e['kanit']}")
+
+    if son:
+        L.append(f"\n## Son durum ({tarih})\n\n{son.get('ozet','')}\n")
+        acik = [a for a in (son.get("acik_kalanlar") or []) if str(a).strip()]
+        if acik:
+            bayat = gun_farki(son.get("session_ts")) > TAZE_GUN
+            baslik = "Acik isler" if not bayat else \
+                     f"Acik isler *(son oturum {int(gun_farki(son.get('session_ts')))} gun once — dogrula)*"
+            L.append(f"### {baslik}\n")
+            for a in acik:
+                L.append(f"- [ ] {a}")
+
+    hyps = [(r, h) for r in rows for h in (r.get("curutulmus_hipotezler") or [])]
+    hyps, hd = tekille(hyps, lambda x: x[1].get("iddia"))
+    if hyps:
+        L.append(f"\n## Curutulmus hipotezler ({len(hyps)})\n")
+        if hd:
+            L.append(f"*{hd} yakin-tekrar birlestirildi.*\n")
+        L.append("Denenip elenmis yollar. Ayni yolu yeniden onermeden once oku.\n")
+        for r, h in hyps[::-1]:
+            L.append(f"\n**{h.get('iddia','')}**  \n"
+                     f"*{(r.get('session_ts') or '')[:10]}* · "
+                     f"test: {h.get('nasil_test_edildi','—')}  \n"
+                     f"→ {h.get('neden_reddedildi','')}"
+                     + (f"  \nkanit: `{h['kanit']}`" if h.get("kanit") else ""))
+
+    kars = [(r, k) for r in rows for k in (r.get("kararlar") or [])]
+    kars, kd = tekille(kars, lambda x: x[1].get("karar"))
+    if kars:
+        L.append(f"\n## Kararlar ({len(kars)})" + (f" — *{kd} tekrar birlestirildi*" if kd else "") + "\n")
+        L.append("| tarih | karar | gerekce | kanit |")
+        L.append("|---|---|---|---|")
+        for r, k in kars[::-1]:
+            def c(x):
+                return " ".join(str(x or "").split()).replace("|", "\\|")
+            L.append(f"| {(r.get('session_ts') or '')[:10]} | {c(k.get('karar'))} | "
+                     f"{c(k.get('gerekce'))} | {c(k.get('kanit'))} |")
+
+    L.append(f"\n## Oturumlar\n")
+    for r in rows[::-1][:30]:
+        L.append(f"- **{(r.get('session_ts') or '')[:10]}** ({r.get('harness')}, "
+                 f"{r.get('turns')} tur) — {r.get('ozet','')}")
+    return "\n".join(L) + "\n"
+
+
+def main():
+    rows = load_sessions()
+    if not rows:
+        print("store bos"); return
+    projs = sorted({r["project"] for r in rows})
+
+    for p in projs:
+        yaz(os.path.join(BEYIN, "projeler", f"{p}.md"), proje_dosyasi(p))
+
+    # index
+    L = ["# Beyin\n", UYARI, f"\n*son derleme: {time.strftime('%Y-%m-%d %H:%M')}*\n"]
+    L.append("\n| proje | oturum | karar | hipotez | son | acik |")
+    L.append("|---|---:|---:|---:|---|---:|")
+    tk = th = 0
+    for p in projs:
+        st = project_stats(p); son = st["son"] or {}
+        pr = load_sessions(p)
+        nk = len(tekille([(r, k) for r in pr for k in (r.get("kararlar") or [])],
+                         lambda x: x[1].get("karar"))[0])
+        nh = len(tekille([(r, h) for r in pr for h in (r.get("curutulmus_hipotezler") or [])],
+                         lambda x: x[1].get("iddia"))[0])
+        acik = len([a for a in (son.get("acik_kalanlar") or []) if str(a).strip()])
+        taze = gun_farki(son.get("session_ts")) <= TAZE_GUN
+        L.append(f"| [[{p}]] | {st['oturum']} | {nk} | {nh} | "
+                 f"{(son.get('session_ts') or '')[:10]} | {acik if taze else '·'} |")
+        tk += nk; th += nh
+    L.append(f"\n**Toplam:** {len(rows)} oturum, {tk} karar, {th} curutulmus hipotez")
+    L.append(f"\n*'acik' kolonu sadece {TAZE_GUN} gunden yeni oturumlar icin gosterilir; "
+             "eskiler bayat sayilir.*")
+    L.append("\n## Kenarlar\n\nElle yazilan tek dosya: [[graph]]\n")
+    L.append("\n## Sorgu\n\n```bash\n~/beyin/bin/beyin durum\n"
+             "~/beyin/bin/beyin hipotez <proje>\n~/beyin/bin/beyin ara <kelime>\n"
+             "~/beyin/bin/beyin devir <proje>\n```\n")
+    yaz(os.path.join(BEYIN, "index.md"), "\n".join(L))
+
+    # butun hipotezler tek dosyada — akademik varlik
+    H = ["# Curutulmus hipotezler\n", UYARI,
+         "\nProje klasoru silinse bile bu kayit yasar.\n"]
+    n = 0
+    for p in projs:
+        hs = [(r, h) for r in load_sessions(p) for h in (r.get("curutulmus_hipotezler") or [])]
+        if not hs:
+            continue
+        H.append(f"\n## [[{p}]] ({len(hs)})\n")
+        for r, h in hs[::-1]:
+            n += 1
+            H.append(f"\n**{h.get('iddia','')}**  \n"
+                     f"*{(r.get('session_ts') or '')[:10]}* · test: {h.get('nasil_test_edildi','—')}  \n"
+                     f"→ {h.get('neden_reddedildi','')}"
+                     + (f"  \nkanit: `{h['kanit']}`" if h.get("kanit") else ""))
+    H.insert(3, f"\n**Toplam {n} kayit.**\n")
+    yaz(os.path.join(BEYIN, "hipotezler.md"), "\n".join(H) + "\n")
+
+    with open(os.path.join(STATE, "son-derleme"), "w") as f:
+        f.write(str(int(time.time())))
+    blog(f"DERLENDI {len(projs)} proje, {len(rows)} oturum", "derle.log")
+    print(f"derlendi: {len(projs)} proje dosyasi + index.md + hipotezler.md")
+
+
+if __name__ == "__main__":
+    main()
