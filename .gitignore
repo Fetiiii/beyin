@@ -1,11 +1,12 @@
-store/
-state/
-events.jsonl
-projeler/
-index.md
-hipotezler.md
-ayarlar.md
-graph.md
+# kullanicinin kendi verisi — asla git'e girmemeli
+/store/
+/state/
+/events.jsonl
+/projeler/
+/index.md
+/hipotezler.md
+/ayarlar.md
+/graph.md
 __pycache__/
 *.pyc
 .obsidian/workspace*
