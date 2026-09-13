@@ -11,6 +11,7 @@
   beyin canli                    su an calisan oturumlar
   beyin derle                    markdown gorunumu yeniden uret
   beyin doktor                   tani
+  beyin yayinla [--kuru]         kodu yayin deposuna tasi (once sizinti tarar)
   beyin skill-bagla <isim>       skill'i iki harness'a da bagla
   beyin gorevlendir <proje> "<gorev>"   alt ajani o projede calistir
   beyin hipotez-ekle <proje> ...   curutulmus hipotezi elle kaydet
@@ -141,6 +142,9 @@ def main():
                     print(f"{pr:26} {k.get('harness'):7} {(k.get('son_gorulme') or '')[11:16]}  {son[:50]}")
             if hic:
                 print("canli oturum yok")
+        elif c == "yayinla":
+            os.execv(sys.executable, [sys.executable,
+                     os.path.join(os.path.dirname(os.path.abspath(__file__)), "beyin-yayinla")] + a[1:])
         elif c in ("derle", "doktor"):
             os.execv(sys.executable, [sys.executable,
                      os.path.join(os.path.dirname(os.path.abspath(__file__)), "beyin-" + c)])

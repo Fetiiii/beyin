@@ -1,0 +1,196 @@
+#!/usr/bin/env python3
+"""beyin yayinla — kodu ozel depodan yayin deposuna tasir, once sizinti tarar.
+
+Iki depo bilerek ayri: ~/beyin senin gercek hafizani tutar (proje adlari,
+kararlar, yayinlanmamis bulgular), yayin deposu sadece kodu.
+
+Tarama terimleri ELLE YAZILMAZ, senin kendi verinden turetilir: proje
+anahtarlari, disk uzerindeki gercek klasor adlari, ev yolu, git e-postalari.
+Boylece yeni bir proje ekledigin gun liste kendini gunceller.
+"""
+import sys, os, re, json, shutil, subprocess, argparse
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from beyin_lib import BEYIN, AYARLAR, HOME, load_sessions, slug, _roots, blog
+
+TASINAN = ["bin", "hooks", "skills"]
+ATLA = {"__pycache__", ".pyc", ".DS_Store"}
+MIN_UZUNLUK = 4          # daha kisa terimler cok fazla yanlis pozitif verir
+
+
+def hassas_terimler():
+    t = set()
+    kullanici = os.path.basename(HOME)
+    t.add(kullanici)
+    t.add(HOME)
+    for r in _roots():
+        t.add(r)
+        t.add(os.path.basename(r))
+        if os.path.isdir(r):
+            for ad in os.listdir(r):
+                if os.path.isdir(os.path.join(r, ad)):
+                    t.add(ad)
+                    t.add(slug(ad))
+    for rec in load_sessions():
+        t.add(rec.get("project") or "")
+    for cfg in (os.path.join(HOME, ".gitconfig"), os.path.join(BEYIN, ".git", "config")):
+        try:
+            for m in re.finditer(r"email\s*=\s*(\S+)", open(cfg, encoding="utf-8").read()):
+                t.add(m.group(1))
+        except Exception:
+            pass
+    # ayarlar.md > "Yayin taramasi": "- kelime" ekler, "- !kelime" cikarir
+    haric = set()
+    try:
+        icinde = False
+        for line in open(AYARLAR, encoding="utf-8"):
+            s = line.strip()
+            if s.startswith("## "):
+                icinde = "yayin-taramasi" in slug(s)
+                continue
+            if s.startswith("### "):
+                icinde = False
+            if icinde and s.startswith("- "):
+                v = s[2:].strip()
+                (haric if v.startswith("!") else t).add(v.lstrip("!"))
+    except Exception:
+        pass
+    hl = {x.lower() for x in haric}
+    return sorted({x for x in t if x and len(x) >= MIN_UZUNLUK and x.lower() not in hl},
+                  key=len, reverse=True)
+
+
+def tara(kok, terimler):
+    bulgular = []
+    for dp, dn, fn in os.walk(kok):
+        dn[:] = [d for d in dn if d not in ATLA and d != ".git"]
+        for f in fn:
+            if any(f.endswith(x) for x in ATLA):
+                continue
+            yol = os.path.join(dp, f)
+            try:
+                icerik = open(yol, encoding="utf-8", errors="replace").read()
+            except Exception:
+                continue
+            for i, satir in enumerate(icerik.splitlines(), 1):
+                for term in terimler:
+                    if term.lower() in satir.lower():
+                        bulgular.append((os.path.relpath(yol, kok), i, term, satir.strip()[:90]))
+                        break
+    return bulgular
+
+
+def kopyala(hedef, kuru):
+    tasinan = []
+    for d in TASINAN:
+        kaynak = os.path.join(BEYIN, d)
+        if not os.path.isdir(kaynak):
+            continue
+        for dp, dn, fn in os.walk(kaynak):
+            dn[:] = [x for x in dn if x not in ATLA]
+            for f in fn:
+                if any(f.endswith(x) for x in ATLA):
+                    continue
+                src = os.path.join(dp, f)
+                rel = os.path.relpath(src, BEYIN)
+                dst = os.path.join(hedef, rel)
+                if not kuru:
+                    os.makedirs(os.path.dirname(dst), exist_ok=True)
+                    shutil.copy2(src, dst)
+                tasinan.append(rel)
+    return tasinan
+
+
+def main():
+    ap = argparse.ArgumentParser(prog="beyin yayinla")
+    ap.add_argument("--hedef", default=os.path.join(HOME, "beyin-public"))
+    ap.add_argument("--mesaj", "-m", default=None)
+    ap.add_argument("--kuru", action="store_true", help="hicbir sey yazma, sadece goster")
+    ap.add_argument("--zorla", action="store_true", help="tarama bulgusuna ragmen devam et")
+    ap.add_argument("--push", action="store_true")
+    a = ap.parse_args()
+
+    if not os.path.isdir(os.path.join(a.hedef, ".git")):
+        print(f"hedef bir git deposu degil: {a.hedef}")
+        return 1
+
+    terimler = hassas_terimler()
+    print(f"── tarama terimleri: {len(terimler)} adet (kendi verinden turetildi)")
+    print(f"   ornek: {', '.join(terimler[:5])} ...\n")
+
+    # ONCE kaynagi tara — kirliyse kopyalama bile yapma
+    kirli = []
+    for d in TASINAN:
+        kok = os.path.join(BEYIN, d)
+        if os.path.isdir(kok):
+            kirli += [(os.path.join(d, r), i, t, s) for r, i, t, s in tara(kok, terimler)]
+
+    if kirli:
+        print(f"🔴 {len(kirli)} sizinti bulundu — kopyalama YAPILMADI:\n")
+        for yol, sat, term, icerik in kirli[:25]:
+            print(f"   {yol}:{sat}")
+            print(f"      terim: {term!r}")
+            print(f"      {icerik}")
+        if len(kirli) > 25:
+            print(f"   ... {len(kirli)-25} tane daha")
+        print("\n   Duzelt, ya da terim gercekten zararsizsa --zorla ile devam et.")
+        if not a.zorla:
+            return 2
+        print("\n   --zorla verildi, devam ediliyor.\n")
+
+    if a.kuru:
+        # kopyalamadan farki hesapla
+        import filecmp
+        yeni, degisen = [], []
+        for rel in kopyala(a.hedef, True):
+            src, dst = os.path.join(BEYIN, rel), os.path.join(a.hedef, rel)
+            if not os.path.exists(dst):
+                yeni.append(rel)
+            elif not filecmp.cmp(src, dst, shallow=False):
+                degisen.append(rel)
+        artik = []
+        for d in TASINAN:
+            hk = os.path.join(a.hedef, d)
+            for dp, dn, fn in os.walk(hk):
+                dn[:] = [x for x in dn if x not in ATLA and x != ".git"]
+                for f in fn:
+                    rel = os.path.relpath(os.path.join(dp, f), a.hedef)
+                    if not os.path.exists(os.path.join(BEYIN, rel)):
+                        artik.append(rel)
+        if not (yeni or degisen or artik):
+            print("✅ tarama temiz, degisiklik yok — iki depo ayni")
+            return 0
+        print("✅ tarama temiz. Yapilacaklar:\n")
+        for r_ in yeni:    print(f"   YENI     {r_}")
+        for r_ in degisen: print(f"   DEGISTI  {r_}")
+        for r_ in artik:   print(f"   ARTIK    {r_}  (hedefte var, kaynakta yok — elle sil)")
+        print("\n(kuru calistirma — hicbir sey yazilmadi)")
+        return 0
+
+    tasinan = kopyala(a.hedef, False)
+    print(f"✅ {len(tasinan)} dosya tasindi")
+
+    r = subprocess.run(["git", "-C", a.hedef, "status", "--porcelain"],
+                       capture_output=True, text=True)
+    if not r.stdout.strip():
+        print("degisiklik yok.")
+        return 0
+    print("\n── degisiklikler")
+    subprocess.run(["git", "-C", a.hedef, "add", "-A"])
+    subprocess.run(["git", "-C", a.hedef, "diff", "--cached", "--stat"])
+
+    mesaj = a.mesaj or "kod guncellemesi"
+    subprocess.run(["git", "-C", a.hedef, "commit", "-q", "-m", mesaj])
+    print(f"\n✅ commit: {mesaj}")
+    blog(f"YAYINLA {len(tasinan)} dosya -> {a.hedef}", "yayinla.log")
+
+    if a.push:
+        p = subprocess.run(["git", "-C", a.hedef, "push"], capture_output=True, text=True)
+        print(p.stdout or p.stderr)
+    else:
+        print(f"   push icin: git -C {a.hedef} push")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
