@@ -279,7 +279,10 @@ def project_stats(project):
     }
 
 
-MAX_ACIK = 6          # sadece SON oturumun acik isleri, o da kirpilarak
+# Sadece SON oturumun acik isleri. 12 bir emniyet supabi, rutin kirpma degil:
+# olculdu, sinirsiz birakilinca en buyuk enjeksiyon 2097 karakter (butce 2500).
+# Onceki deger 6 idi ve gercek kullanimda iki acik isi gizledi.
+MAX_ACIK = 12
 
 
 def build_context(project, session=None):
