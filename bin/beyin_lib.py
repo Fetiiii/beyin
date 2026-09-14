@@ -210,7 +210,10 @@ def append_jsonl(path, rec):
 
 # ────────────────────────── kenarlar (graph.md) ──────────────────────────
 GRAPH = os.path.join(BEYIN, "graph.md")
-INJECT_BUDGET = 2500          # olculdu: en buyuk proje 1339 karakter, ustune pay
+# Olculdu (2026-09-14, 14 proje): acik isler + yapilanlar eklendikten sonra
+# en buyuk enjeksiyon 3756 karakter (~940 token). 4000 pay birakiyor.
+# Bekleyen devir notu varsa ustune +3000.
+INJECT_BUDGET = 4000
 
 
 def read_edges():
@@ -269,13 +272,35 @@ def load_sessions(project=None):
     return out
 
 
+ANLAMLI_TUR = 20          # bundan kisa ve kararsiz oturum "durum kontrolu" sayilir
+
+
+def anlamli_mi(r):
+    """Gercek is oturumu mu, yoksa durum kontrolu mu?
+
+    'Ne durumdayiz?' sorusu da bir oturumdur ve ozetlenir. Gercek is oturumunu
+    'son oturum' koltugundan duserse hafizayi okumak hafizayi kirletir.
+
+    Tek sinyal yetmiyor:
+    - sadece uzunluk: uzun bir durum kontrolu de olabilir (8 dakikalik ornek var)
+    - sadece bulgu: durum kontrolu de bulgu uretebilir ("35 degil 42'ymis")
+    Ikisi birden gerekiyor. Sezgisel, kusursuz degil.
+    """
+    if (r.get("turns") or 0) < ANLAMLI_TUR:
+        return False
+    return bool((r.get("kararlar") or []) or (r.get("curutulmus_hipotezler") or [])
+                or len(r.get("dokunulan_dosyalar") or []) >= 3)
+
+
 def project_stats(project):
     rows = load_sessions(project)
+    anlamli = [r for r in rows if anlamli_mi(r)]
     return {
         "oturum": len(rows),
         "karar": sum(len(r.get("kararlar") or []) for r in rows),
         "hipotez": sum(len(r.get("curutulmus_hipotezler") or []) for r in rows),
-        "son": rows[-1] if rows else None,
+        "son": (anlamli[-1] if anlamli else (rows[-1] if rows else None)),
+        "son_dokunus": rows[-1] if rows else None,
     }
 
 
@@ -283,6 +308,7 @@ def project_stats(project):
 # olculdu, sinirsiz birakilinca en buyuk enjeksiyon 2097 karakter (butce 2500).
 # Onceki deger 6 idi ve gercek kullanimda iki acik isi gizledi.
 MAX_ACIK = 12
+MAX_YAPILAN = 12
 
 
 def build_context(project, session=None):
@@ -306,14 +332,28 @@ def build_context(project, session=None):
     son = st["son"]
     if son:
         tarih = (son.get("session_ts") or son.get("ts") or "")[:10]
-        L.append(f"\nSon oturum ({tarih}, {son.get('harness')}): {son.get('ozet','')}")
         acik = [a for a in (son.get("acik_kalanlar") or []) if str(a).strip()]
         if acik:
-            L.append("O oturumda acik kalanlar:")
+            L.append("\nACIK ISLER (son is oturumundan):")
             for a in acik[:MAX_ACIK]:
-                L.append(f"- {a}")
+                L.append(f"- [ ] {a}")
             if len(acik) > MAX_ACIK:
                 L.append(f"- (+{len(acik)-MAX_ACIK} tane daha)")
+
+        L.append(f"\nSON IS OTURUMU ({tarih}, {son.get('harness')}): {son.get('ozet','')}")
+        yap = [y for y in (son.get("yapilanlar") or []) if str(y).strip()]
+        if yap:
+            L.append("O oturumda yapilanlar:")
+            for y in yap[:MAX_YAPILAN]:
+                L.append(f"- {y}")
+            if len(yap) > MAX_YAPILAN:
+                L.append(f"- (+{len(yap)-MAX_YAPILAN} tane daha)")
+
+        sd = st.get("son_dokunus")
+        if sd is not None and sd is not son:
+            sdt = (sd.get("session_ts") or sd.get("ts") or "")[:10]
+            L.append(f"\n(Not: projeye en son {sdt} tarihinde dokunuldu ama o oturum "
+                     f"durum kontroluydu, yeni is uretmedi.)")
 
     if edges:
         L.append("\nBagli projeler:")
@@ -347,6 +387,10 @@ def build_context(project, session=None):
                  f"(butun kelimeler gecmeli, tam ifade degil) · tamami: `beyin --help`")
         ALT.append("Curutulmus hipotez = daha once denenip elenmis yol. "
                  "Ayni yolu yeniden onermeden once bak.")
+    ALT.append("DURUM SORUSU ('ne durumdayiz', 'nerede kaldik', 'son durum') geldiginde: "
+               "once yukaridaki ACIK ISLER'i madde madde soyle, sonra SON IS OTURUMU'nda "
+               "yapilanlari kisaca ozetle. Bunlar zaten elinde — repoyu bastan taramana "
+               "gerek yok. Ucuz dogrulama (git durumu, dosya var mi) ekleyebilirsin.")
     ALT.append("HAFIZADAKI OLCUM VE SAYILAR TARIHSELDIR — o gunku ortami yansitir, "
                  "bugun dogru olmayabilir. Durum sorusuna once hafiza + ucuz kontrollerle "
                  "(git, dosya, ps, tek sorgu) cevap ver; benchmark, tam yeniden olcum ya da "
