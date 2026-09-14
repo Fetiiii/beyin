@@ -5,7 +5,7 @@
   beyin gecmis  <proje> [n]      son n oturum ozeti
   beyin karar   <proje> [n]      kararlar (yeniden eskiye)
   beyin hipotez <proje> [n]      curutulmus hipotezler
-  beyin ara     <kelime>         her seyde ara
+  beyin ara     <kelime> [--proje X]  her seyde ara (butun kelimeler gecmeli)
   beyin baglam  <proje>          SessionStart'ta enjekte edilen metni goster
   beyin devir   <proje>          devam eden oturumdan devir notu uret
   beyin canli                    su an calisan oturumlar
@@ -84,26 +84,49 @@ def cmd_hipotez(proj, n=20):
         print()
 
 
-def cmd_ara(kelime):
-    k = kelime.lower()
+def _esles(metin, parcalar):
+    """Butun parcalar geciyorsa eslesir (AND). Tam ifade sart degil."""
+    m = metin.lower()
+    return all(p in m for p in parcalar)
+
+
+def cmd_ara(kelime, proje=None):
+    parcalar = [p for p in kelime.lower().split() if p]
+    if not parcalar:
+        print("arama terimi bos"); return
     n = 0
-    for r in load_sessions():
-        blob = json.dumps(r, ensure_ascii=False).lower()
-        if k not in blob:
+    for r in load_sessions(proje):
+        if not _esles(json.dumps(r, ensure_ascii=False), parcalar):
             continue
         hits = []
         for kk in (r.get("kararlar") or []):
-            if k in json.dumps(kk, ensure_ascii=False).lower():
+            if _esles(json.dumps(kk, ensure_ascii=False), parcalar):
                 hits.append(("KARAR", kk.get("karar", "")))
         for hh in (r.get("curutulmus_hipotezler") or []):
-            if k in json.dumps(hh, ensure_ascii=False).lower():
+            if _esles(json.dumps(hh, ensure_ascii=False), parcalar):
                 hits.append(("HIPOTEZ", hh.get("iddia", "")))
-        if not hits and k in (r.get("ozet", "") or "").lower():
-            hits.append(("OZET", r.get("ozet", "")))
+        for a in (r.get("acik_kalanlar") or []):
+            if _esles(str(a), parcalar):
+                hits.append(("ACIK", a))
+        for y in (r.get("yapilanlar") or []):
+            if _esles(str(y), parcalar):
+                hits.append(("YAPILAN", y))
+        for f in (r.get("dokunulan_dosyalar") or []):
+            if _esles(str(f), parcalar):
+                hits.append(("DOSYA", f))
+        if not hits:
+            hits.append(("OZET", " ".join((r.get("ozet") or "").split())[:150] + "…"))
+        hits = hits[:4]
+        tarih = (r.get("session_ts") or r.get("ts") or "")[:10]
         for tag, txt in hits:
             n += 1
-            print(f"[{r['project']:26}] {tag:8} {wrap(txt, 40)}")
-    print(f"\n{n} sonuc")
+            print(f"[{r['project']:24}] {tarih} {tag:8} {wrap(txt, 48)}")
+    if n == 0:
+        print(f"0 sonuc — '{' '.join(parcalar)}'")
+        print("Ipucu: arama butun kelimelerin GECMESINI arar (AND), tam ifade degil.")
+        print("       Daha az kelimeyle dene, ya da: beyin gecmis <proje> 5")
+    else:
+        print(f"\n{n} sonuc")
 
 
 def main():
@@ -121,7 +144,12 @@ def main():
         elif c == "hipotez":
             cmd_hipotez(a[1], int(a[2]) if len(a) > 2 else 20)
         elif c == "ara":
-            cmd_ara(" ".join(a[1:]))
+            # "beyin ara <kelime> --proje X"
+            arg = a[1:]
+            proje = None
+            if "--proje" in arg:
+                i = arg.index("--proje"); proje = arg[i+1]; arg = arg[:i] + arg[i+2:]
+            cmd_ara(" ".join(arg), proje)
         elif c == "hipotez-ekle":
             os.execv(sys.executable, [sys.executable,
                      os.path.join(os.path.dirname(os.path.abspath(__file__)), "beyin-hipotez-ekle")] + a[1:])

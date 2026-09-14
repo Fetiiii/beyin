@@ -338,8 +338,9 @@ def build_context(project, session=None):
     if st["karar"] or st["hipotez"]:
         L.append(f"\nBu projede birikmis hafiza: {st['karar']} karar, "
                  f"{st['hipotez']} curutulmus hipotez ({st['oturum']} oturumdan).")
-        L.append(f"Gerekirse calistir: `~/beyin/bin/beyin karar {project}` · "
-                 f"`~/beyin/bin/beyin hipotez {project}` · `~/beyin/bin/beyin ara <kelime>`")
+        L.append(f"Sorgu: `~/beyin/bin/beyin karar|hipotez|gecmis {project}` · "
+                 f"`~/beyin/bin/beyin ara <kelimeler> --proje {project}` "
+                 f"(butun kelimeler gecmeli, tam ifade degil) · tamami: `beyin --help`")
         L.append("Curutulmus hipotez = daha once denenip elenmis yol. "
                  "Ayni yolu yeniden onermeden once bak.")
 
