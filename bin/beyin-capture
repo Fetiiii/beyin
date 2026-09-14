@@ -68,7 +68,17 @@ def main():
             touch_live(proj, sid, harness, cwd, rec.get("prompt"), rec.get("transcript"))
         elif event == "SessionEnd":
             close_live(proj, sid)
-            consume_devir(proj, sid)
+            # Devir notunu ancak IS YAPMIS oturum tuketir; tur sayisini
+            # dokumden okuyoruz (kayit henuz yazilmadi, ozetleyici arka planda).
+            try:
+                from beyin_lib import read_transcript
+                _t = read_transcript(rec.get("transcript"), harness)
+                _u = len([x for x in _t if x[0] == "user"])
+                _rec = {"turns": len(_t), "kararlar": [], "curutulmus_hipotezler": [],
+                        "dokunulan_dosyalar": []}
+            except Exception:
+                _rec = None
+            consume_devir(proj, sid, _rec)
 
     if event in SUMMARIZE_ON and rec["transcript"]:
         spawn_summarizer(rec)

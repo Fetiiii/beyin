@@ -651,16 +651,21 @@ def devir_sahibi(path):
     return None
 
 
-def consume_devir(project, session=None):
+def consume_devir(project, session=None, rec=None):
     """Devralan oturum bitince notu tuket.
 
-    Notu URETEN oturum tuketmez — yoksa PreCompact'te uretilen not, ayni
-    oturum kapaninca hemen olur ve devralan hic goremez.
+    Iki istisna:
+    - Notu URETEN oturum tuketmez (yoksa PreCompact'te uretilen not ayni
+      oturum kapaninca olur, devralan hic goremez).
+    - Is yapmamis oturum tuketmez. 14 saniyelik bir 'ne durumdayiz' sorusu
+      gercek bir devir notunu harcamamalı.
     """
     p = pending_devir(project)
     if not p:
         return
     if session and devir_sahibi(p) == session:
+        return
+    if rec is not None and not anlamli_mi(rec):
         return
     try:
         os.rename(p, p + ".done")
