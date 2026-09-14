@@ -338,17 +338,28 @@ def build_context(project, session=None):
             L.append("=== DEVIR NOTU SONU ===")
             L.append("Bu not sana devredilen isi anlatiyor. Kullanicinin tekrar anlatmasini bekleme.")
 
+    ALT = []
     if st["karar"] or st["hipotez"]:
-        L.append(f"\nBu projede birikmis hafiza: {st['karar']} karar, "
+        ALT.append(f"\nBu projede birikmis hafiza: {st['karar']} karar, "
                  f"{st['hipotez']} curutulmus hipotez ({st['oturum']} oturumdan).")
-        L.append(f"Sorgu: `~/beyin/bin/beyin karar|hipotez|gecmis {project}` · "
+        ALT.append(f"Sorgu: `~/beyin/bin/beyin karar|hipotez|gecmis {project}` · "
                  f"`~/beyin/bin/beyin ara <kelimeler> --proje {project}` "
                  f"(butun kelimeler gecmeli, tam ifade degil) · tamami: `beyin --help`")
-        L.append("Curutulmus hipotez = daha once denenip elenmis yol. "
+        ALT.append("Curutulmus hipotez = daha once denenip elenmis yol. "
                  "Ayni yolu yeniden onermeden once bak.")
+    ALT.append("HAFIZADAKI OLCUM VE SAYILAR TARIHSELDIR — o gunku ortami yansitir, "
+                 "bugun dogru olmayabilir. Durum sorusuna once hafiza + ucuz kontrollerle "
+                 "(git, dosya, ps, tek sorgu) cevap ver; benchmark, tam yeniden olcum ya da "
+                 "dakikalar suren script calistirmadan ONCE kullaniciya sor ve maliyeti soyle.")
 
-    limit = INJECT_BUDGET + (3000 if devir else 0)
-    return "\n".join(L)[:limit]
+    # Butce sadece GOVDEYE uygulanir; alt bilgi (kural satirlari) hep eklenir.
+    # Aksi halde kirpma sondan yaptigi icin en kritik satirlar ilk kesilen olur.
+    alt = "\n".join(ALT)
+    limit = INJECT_BUDGET + (3000 if devir else 0) - len(alt) - 1
+    govde = "\n".join(L)
+    if len(govde) > limit:
+        govde = govde[:limit - 20].rstrip() + "\n… (kirpildi)"
+    return govde + "\n" + alt
 
 
 def emit_context(event, text):
