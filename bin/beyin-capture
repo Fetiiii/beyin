@@ -11,7 +11,9 @@ from beyin_lib import (EVENTS, STATE, project_key, append_jsonl, build_context,
                        emit_context, touch_live, close_live, consume_devir,
                        guard_karari, emit_deny)
 
-SUMMARIZE_ON = {"SessionEnd", "PreCompact"}
+# PreCompact bilerek YOK: "baglam doldu" ile "limit bitiyor" ayni sey degil.
+# Devir notu ELLE cagrilir: beyin devir <proje>
+SUMMARIZE_ON = {"SessionEnd"}
 INJECT_ON    = {"SessionStart", "SubagentStart"}
 GUARD_ON     = {"PreToolUse"}
 
@@ -86,11 +88,6 @@ def main():
     if event == "SessionEnd":
         maybe_compile()
 
-    # PreCompact = baglam doluyor = uzun oturum. Devir notunu simdi uret,
-    # limit bitmesini beklemeden hazir olsun. Arka planda, kimse beklemez.
-    if event == "PreCompact":
-        spawn_devir(proj)
-
     if event in INJECT_ON:
         emit_context(event, build_context(proj, rec.get("session")))
 
@@ -113,15 +110,6 @@ def maybe_compile():
                      stderr=subprocess.STDOUT,
                      start_new_session=True, cwd="/tmp",
                      env=dict(os.environ, BEYIN_NO_CAPTURE="1"))
-
-
-def spawn_devir(proj):
-    here = os.path.dirname(os.path.abspath(__file__))
-    subprocess.Popen([sys.executable, os.path.join(here, "beyin-devir"), proj],
-                     stdin=subprocess.DEVNULL,
-                     stdout=open(os.path.join(STATE, "devir.log"), "a"),
-                     stderr=subprocess.STDOUT, start_new_session=True,
-                     cwd="/tmp", env=dict(os.environ, BEYIN_NO_CAPTURE="1"))
 
 
 def spawn_summarizer(rec):

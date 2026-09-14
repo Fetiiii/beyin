@@ -269,7 +269,19 @@ def load_sessions(project=None):
             continue
         out.append(r)
     out.sort(key=lambda r: r.get("session_ts") or r.get("ts") or "")
-    return out
+    # Ayni oturumdan birden fazla kayit olabilir: SessionEnd bazen iki kez
+    # atesliyor. Append-only bozulmasin diye OKURKEN tekilliyoruz; her
+    # (oturum, tetikleyici) cifti icin en son yazilan kalir.
+    tek, sira = {}, []
+    for r in out:
+        anahtar = (r.get("session"), r.get("trigger"), r.get("source"))
+        if anahtar[0] is None:
+            sira.append(r); continue
+        if anahtar in tek:
+            sira[tek[anahtar]] = r
+        else:
+            tek[anahtar] = len(sira); sira.append(r)
+    return sira
 
 
 ANLAMLI_TUR = 20          # bundan kisa ve kararsiz oturum "durum kontrolu" sayilir
