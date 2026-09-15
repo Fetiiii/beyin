@@ -210,10 +210,12 @@ def append_jsonl(path, rec):
 
 # ────────────────────────── kenarlar (graph.md) ──────────────────────────
 GRAPH = os.path.join(BEYIN, "graph.md")
-# Olculdu (2026-09-14, 14 proje): acik isler + yapilanlar eklendikten sonra
-# en buyuk enjeksiyon 3756 karakter (~940 token). 4000 pay birakiyor.
+# Olculdu (2026-09-15, 14 proje): acik isler + yapilanlar + kaynak sayisi +
+# DELEGE/DURUM/OLCUM kurallari dahil en buyuk enjeksiyon ~4250 karakter.
+# 5000 pay birakiyor. Bu deger dorduncu kez yukseltildi: her seferinde
+# tahminle degil olcumle. Enjeksiyona satir ekleyen once burayi olcsun.
 # Bekleyen devir notu varsa ustune +3000.
-INJECT_BUDGET = 4000
+INJECT_BUDGET = 5000
 
 
 def read_edges():
