@@ -45,6 +45,21 @@ hafızasını otomatik alır. Şu durumlarda kullan:
 ~/beyin/bin/beyin gorevlendir <proje> "<görev>"
 ```
 
+**Gidip gelmeli iş varsa alt ajanı isimlendir.** Tek atışlık görev çoğu işe
+yeter; ama alt ajan bir şey bulup senin "peki şu ne?" diye sorman gerekiyorsa:
+
+```bash
+~/beyin/bin/beyin gorevlendir <proje> "<ilk görev>" --ad kesif
+~/beyin/bin/beyin gorevlendir --devam kesif "<takip sorusu>"
+~/beyin/bin/beyin ajanlar          # kimler açık
+~/beyin/bin/beyin ajan-kapat kesif # işi bitince unut
+```
+
+İsimlendirilmiş ajan önceki turları hatırlar, sen bağlamı tekrar anlatmazsın.
+Ama kendi bağlamı da birikir — **görev bitince kapat.** Açık bıraktığın ajan,
+bir sonraki turda alakasız bir geçmişle gelir. İki farklı iş için iki farklı
+ad kullan, aynı ajanı her şeye koşturma.
+
 Hangi tarafa gideceğini kullanıcı belirler (`beyin isci`); sen seçme, varsayılanı
 kullan. Kullanıcı açıkça "Codex'e at" derse `--harness codex` ekle.
 

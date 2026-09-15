@@ -13,8 +13,11 @@
   beyin doktor                   tani
   beyin yayinla [--kuru]         kodu yayin deposuna tasi (once sizinti tarar)
   beyin skill-bagla <isim>       skill'i iki harness'a da bagla
-  beyin isci [harness] [model]   delege edilen isler hangi tarafa gitsin
-  beyin gorevlendir <proje> "<gorev>"   alt ajani o projede calistir
+  beyin isci [harness] [model] [effort]   delege edilen isler hangi tarafa gitsin
+  beyin gorevlendir <proje> "<gorev>" [--ad X]   alt ajani o projede calistir
+  beyin gorevlendir --devam X "<gorev>"          ayni alt ajana yeni tur
+  beyin ajanlar                  kalici alt ajanlar
+  beyin ajan-kapat <isim>        alt ajani unut
   beyin kaynak  <proje> [n]      dis kaynaktan ogrenilenler
   beyin hipotez-ekle <proje> ...   curutulmus hipotezi elle kaydet
   beyin kaynak-ekle  <proje> ...   kaynak kaydini elle ekle
@@ -165,18 +168,37 @@ def main():
             if "--proje" in arg:
                 i = arg.index("--proje"); proje = arg[i+1]; arg = arg[:i] + arg[i+2:]
             cmd_ara(" ".join(arg), proje)
+        elif c == "ajanlar":
+            from beyin_lib import ajanlar_oku
+            d = ajanlar_oku()
+            if not d:
+                print("kalici alt ajan yok")
+            for ad, k in sorted(d.items(), key=lambda x: x[1].get("son", "")):
+                m = f"/{k['model']}" if k.get("model") else ""
+                e = f" {k['effort']}" if k.get("effort") else ""
+                print(f"  {ad:16} {k['harness']}{m}{e:8} proje={k.get('proje','?'):22} "
+                      f"tur={k.get('tur',0):2} son={(k.get('son') or '')[5:16]}")
+        elif c == "ajan-kapat":
+            from beyin_lib import ajan_sil
+            print("kapatildi" if ajan_sil(a[1]) else "boyle bir alt ajan yok")
         elif c == "isci":
             from beyin_lib import isci_oku, isci_yaz
             if len(a) == 1:
                 d = isci_oku()
-                print(f"isci taraf: {d['harness']}{'/' + d['model'] if d.get('model') else ''}")
-                print("degistirmek icin: beyin isci <claude|codex> [model]")
+                print(f"isci taraf: {d['harness']}{'/' + d['model'] if d.get('model') else ''}"
+                      f"{' effort ' + d['effort'] if d.get('effort') else ''}")
+                print("degistirmek icin: beyin isci <claude|codex> [model] [effort]")
+                print("  codex : gpt-6-astra | gpt-5.6-sol | gpt-5.6-terra | gpt-5.6-luna")
+                print("  claude: opus | sonnet | haiku")
+                print("  effort: low | medium | high | xhigh | max")
             else:
                 h = a[1]
                 if h not in ("claude", "codex"):
                     print("harness: claude ya da codex"); return
-                d = isci_yaz(h, a[2] if len(a) > 2 else None)
-                print(f"isci taraf: {d['harness']}{'/' + d['model'] if d.get('model') else ''}")
+                d = isci_yaz(h, a[2] if len(a) > 2 else None,
+                             a[3] if len(a) > 3 else None)
+                print(f"isci taraf: {d['harness']}{'/' + d['model'] if d.get('model') else ''}"
+                      f"{' effort ' + d['effort'] if d.get('effort') else ''}")
                 print("beyin gorevlendir artik varsayilan olarak buraya atar.")
         elif c == "kaynak":
             cmd_kaynak(a[1], int(a[2]) if len(a) > 2 else 20)

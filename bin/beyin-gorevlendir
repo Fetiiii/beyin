@@ -6,29 +6,54 @@ projenin hafizasini otomatik enjekte eder. Gorevi ayrica anlatmaya gerek yok.
 
 Yazma korumasi PreToolUse hook'uyla alt ajan icin de gecerlidir.
 """
-import sys, os, subprocess, argparse, time
+import sys, os, re, json, subprocess, argparse, time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from beyin_lib import proje_yolu, blog, korunan_desenler, isci_oku
+from beyin_lib import (proje_yolu, blog, korunan_desenler, isci_oku,
+                       ajanlar_oku, ajan_kaydet)
 
 def main():
     ap = argparse.ArgumentParser(prog="beyin gorevlendir")
-    ap.add_argument("proje")
+    ap.add_argument("proje", nargs="?")
     ap.add_argument("gorev")
+    ap.add_argument("--ad", default=None,
+                    help="alt ajani isimlendir; sonra --devam <isim> ile ayni ajana yeni tur")
+    ap.add_argument("--devam", default=None,
+                    help="isimlendirilmis alt ajana yeni tur (proje gerekmez)")
     ap.add_argument("--sandbox", default="danger-full-access",
                     choices=["read-only", "workspace-write", "danger-full-access"])
     ap.add_argument("--harness", default=None, choices=["codex", "claude"],
                     help="varsayilan: `beyin isci` ile secilen taraf")
+    ap.add_argument("--effort", default=None,
+                    choices=["low", "medium", "high", "xhigh", "max"],
+                    help="gorevin agirligina gore; varsayilan `beyin isci`den")
     ap.add_argument("--model", default=None,
                     help="codex: gpt-6-astra|gpt-5.6-sol|gpt-5.6-luna... / claude: opus|sonnet|haiku")
     ap.add_argument("--sessiz", action="store_true")
     a = ap.parse_args()
+
+    onceki = None
+    if a.devam:
+        onceki = ajanlar_oku().get(a.devam)
+        if not onceki:
+            print(f"boyle bir alt ajan yok: {a.devam}")
+            print("mevcutlar: beyin ajanlar")
+            return 1
+        a.proje = a.proje or onceki["proje"]
+        a.harness = a.harness or onceki["harness"]
+        a.model = a.model or onceki.get("model")
+        a.effort = a.effort or onceki.get("effort")
+        a.ad = a.devam
+    if not a.proje:
+        print("proje gerekli (ya da --devam <isim>)"); return 1
 
     isci = isci_oku()
     if a.harness is None:
         a.harness = isci["harness"]
         if a.model is None:
             a.model = isci.get("model")
+    if a.effort is None:
+        a.effort = isci.get("effort")
 
     yol = proje_yolu(a.proje)
     if not yol:
@@ -37,20 +62,38 @@ def main():
         return 1
 
     env = dict(os.environ, BEYIN_ALT_AJAN=os.environ.get("CLAUDE_SESSION_ID", "cli"))
+    sid = (onceki or {}).get("session")
     if a.harness == "codex":
-        cmd = ["codex", "exec", "--skip-git-repo-check", "-s", a.sandbox, "-C", yol]
-        if a.model:
-            cmd += ["-c", f"model={a.model}"]
-        cmd += [a.gorev]
+        if a.devam and sid:
+            # resume: -s ve -C KABUL ETMIYOR. Sandbox ve klasor devam eden
+            # oturumdan miras kalir; cwd'yi subprocess ile veriyoruz.
+            cmd = ["codex", "exec", "resume", "--skip-git-repo-check"]
+            if a.model:
+                cmd += ["-m", a.model]
+            if a.effort:
+                cmd += ["-c", f"model_reasoning_effort={a.effort}"]
+            cmd += [sid, a.gorev]
+        else:
+            cmd = ["codex", "exec", "--skip-git-repo-check", "-s", a.sandbox, "-C", yol]
+            if a.model:
+                cmd += ["-c", f"model={a.model}"]
+            if a.effort:
+                cmd += ["-c", f"model_reasoning_effort={a.effort}"]
+            cmd += [a.gorev]
     else:
-        cmd = ["claude", "-p"]
+        cmd = ["claude", "-p", "--output-format", "json"]
+        if a.devam and sid:
+            cmd += ["--resume", sid]
         if a.model:
             cmd += ["--model", a.model]
+        if a.effort:
+            cmd += ["--effort", a.effort]
         cmd += [a.gorev]
 
     if not a.sessiz:
         print(f"── {a.proje} ({yol})")
-        print(f"   harness={a.harness}{'/' + a.model if a.model else ''} sandbox={a.sandbox}")
+        print(f"   harness={a.harness}{'/' + a.model if a.model else ''}"
+              f"{' effort=' + a.effort if a.effort else ''} sandbox={a.sandbox}")
         print(f"   korunan yollar: {', '.join(korunan_desenler())}\n")
 
     t0 = time.time()
@@ -59,9 +102,29 @@ def main():
     sure = time.time() - t0
     blog(f"GOREVLENDIR {a.proje} sandbox={a.sandbox} rc={r.returncode} {sure:.0f}s", "gorevlendir.log")
 
-    out = "\n".join(l for l in (r.stdout or "").splitlines()
-                    if not any(x in l for x in ("rmcp::", "AuthRequired", "Transport channel")))
+    ham = r.stdout or ""
+    yeni_sid = None
+    if a.harness == "claude":
+        try:
+            d = json.loads(ham)
+            out = d.get("result") or ""
+            yeni_sid = d.get("session_id")
+        except Exception:
+            out = ham
+    else:
+        # codex oturum kimligini STDERR'e yaziyor, stdout'a degil
+        m = re.search(r"session id:\s*([0-9a-f-]{16,})", ham + "\n" + (r.stderr or ""))
+        yeni_sid = m.group(1) if m else None
+        out = "\n".join(l for l in ham.splitlines()
+                         if not any(x in l for x in ("rmcp::", "AuthRequired",
+                                                     "Transport channel", "session id:")))
     print(out.strip())
+
+    if a.ad and (yeni_sid or sid) and r.returncode == 0:
+        k = ajan_kaydet(a.ad, harness=a.harness, model=a.model, effort=a.effort,
+                        proje=a.proje, session=yeni_sid or sid)
+        print(f"\n── alt ajan `{a.ad}` kayitli (tur {k['tur']}) — "
+              f"devam: beyin gorevlendir --devam {a.ad} \"<yeni gorev>\"")
     if r.returncode != 0:
         print(f"\n[rc={r.returncode}] {(r.stderr or '')[:400]}")
     if not a.sessiz:
