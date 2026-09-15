@@ -9,7 +9,7 @@ Yazma korumasi PreToolUse hook'uyla alt ajan icin de gecerlidir.
 import sys, os, subprocess, argparse, time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from beyin_lib import proje_yolu, blog, korunan_desenler
+from beyin_lib import proje_yolu, blog, korunan_desenler, isci_oku
 
 def main():
     ap = argparse.ArgumentParser(prog="beyin gorevlendir")
@@ -17,9 +17,18 @@ def main():
     ap.add_argument("gorev")
     ap.add_argument("--sandbox", default="danger-full-access",
                     choices=["read-only", "workspace-write", "danger-full-access"])
-    ap.add_argument("--harness", default="codex", choices=["codex", "claude"])
+    ap.add_argument("--harness", default=None, choices=["codex", "claude"],
+                    help="varsayilan: `beyin isci` ile secilen taraf")
+    ap.add_argument("--model", default=None,
+                    help="codex: gpt-6-astra|gpt-5.6-sol|gpt-5.6-luna... / claude: opus|sonnet|haiku")
     ap.add_argument("--sessiz", action="store_true")
     a = ap.parse_args()
+
+    isci = isci_oku()
+    if a.harness is None:
+        a.harness = isci["harness"]
+        if a.model is None:
+            a.model = isci.get("model")
 
     yol = proje_yolu(a.proje)
     if not yol:
@@ -29,14 +38,19 @@ def main():
 
     env = dict(os.environ, BEYIN_ALT_AJAN=os.environ.get("CLAUDE_SESSION_ID", "cli"))
     if a.harness == "codex":
-        cmd = ["codex", "exec", "--skip-git-repo-check",
-               "-s", a.sandbox, "-C", yol, a.gorev]
+        cmd = ["codex", "exec", "--skip-git-repo-check", "-s", a.sandbox, "-C", yol]
+        if a.model:
+            cmd += ["-c", f"model={a.model}"]
+        cmd += [a.gorev]
     else:
-        cmd = ["claude", "-p", a.gorev]
+        cmd = ["claude", "-p"]
+        if a.model:
+            cmd += ["--model", a.model]
+        cmd += [a.gorev]
 
     if not a.sessiz:
         print(f"── {a.proje} ({yol})")
-        print(f"   harness={a.harness} sandbox={a.sandbox}")
+        print(f"   harness={a.harness}{'/' + a.model if a.model else ''} sandbox={a.sandbox}")
         print(f"   korunan yollar: {', '.join(korunan_desenler())}\n")
 
     t0 = time.time()

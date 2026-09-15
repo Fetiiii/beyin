@@ -13,8 +13,11 @@
   beyin doktor                   tani
   beyin yayinla [--kuru]         kodu yayin deposuna tasi (once sizinti tarar)
   beyin skill-bagla <isim>       skill'i iki harness'a da bagla
+  beyin isci [harness] [model]   delege edilen isler hangi tarafa gitsin
   beyin gorevlendir <proje> "<gorev>"   alt ajani o projede calistir
+  beyin kaynak  <proje> [n]      dis kaynaktan ogrenilenler
   beyin hipotez-ekle <proje> ...   curutulmus hipotezi elle kaydet
+  beyin kaynak-ekle  <proje> ...   kaynak kaydini elle ekle
 """
 import sys, os, json
 
@@ -90,6 +93,18 @@ def _esles(metin, parcalar):
     return all(p in m for p in parcalar)
 
 
+def cmd_kaynak(proj, n=20):
+    items = [((r.get("session_ts") or r.get("ts") or "")[:10], k)
+             for r in load_sessions(proj) for k in (r.get("kaynaklar") or [])][::-1][:n]
+    print(f"{proj}: {len(items)} kaynak gosteriliyor\n")
+    for ts, k in items:
+        print(f"[{ts}] ({k.get('guven','?')}) {wrap(k.get('bulgu',''), 13)}")
+        print(f"        ← {k.get('kaynak','')}")
+        if k.get("alinti"):
+            print(f"        \u201c{wrap(k['alinti'], 11)}\u201d")
+        print()
+
+
 def cmd_ara(kelime, proje=None):
     parcalar = [p for p in kelime.lower().split() if p]
     if not parcalar:
@@ -150,6 +165,24 @@ def main():
             if "--proje" in arg:
                 i = arg.index("--proje"); proje = arg[i+1]; arg = arg[:i] + arg[i+2:]
             cmd_ara(" ".join(arg), proje)
+        elif c == "isci":
+            from beyin_lib import isci_oku, isci_yaz
+            if len(a) == 1:
+                d = isci_oku()
+                print(f"isci taraf: {d['harness']}{'/' + d['model'] if d.get('model') else ''}")
+                print("degistirmek icin: beyin isci <claude|codex> [model]")
+            else:
+                h = a[1]
+                if h not in ("claude", "codex"):
+                    print("harness: claude ya da codex"); return
+                d = isci_yaz(h, a[2] if len(a) > 2 else None)
+                print(f"isci taraf: {d['harness']}{'/' + d['model'] if d.get('model') else ''}")
+                print("beyin gorevlendir artik varsayilan olarak buraya atar.")
+        elif c == "kaynak":
+            cmd_kaynak(a[1], int(a[2]) if len(a) > 2 else 20)
+        elif c in ("kaynak-ekle",):
+            os.execv(sys.executable, [sys.executable,
+                     os.path.join(os.path.dirname(os.path.abspath(__file__)), "beyin-kaynak-ekle")] + a[1:])
         elif c == "hipotez-ekle":
             os.execv(sys.executable, [sys.executable,
                      os.path.join(os.path.dirname(os.path.abspath(__file__)), "beyin-hipotez-ekle")] + a[1:])

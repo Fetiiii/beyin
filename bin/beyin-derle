@@ -63,7 +63,9 @@ def proje_dosyasi(proj):
 
     tarih = (son.get("session_ts") or "")[:10]
     L.append(f"\n**{st['oturum']} oturum · {st['karar']} karar · "
-             f"{st['hipotez']} curutulmus hipotez · son: {tarih}**\n")
+             f"{st['hipotez']} curutulmus hipotez"
+             + (f" · {st['kaynak']} kaynak" if st.get('kaynak') else "")
+             + f" · son: {tarih}**\n")
 
     edges = edges_for(proj)
     if edges:
@@ -97,6 +99,16 @@ def proje_dosyasi(proj):
                      f"test: {h.get('nasil_test_edildi','—')}  \n"
                      f"→ {h.get('neden_reddedildi','')}"
                      + (f"  \nkanit: `{h['kanit']}`" if h.get("kanit") else ""))
+
+    kays = [(r, k) for r in rows for k in (r.get("kaynaklar") or [])]
+    if kays:
+        L.append(f"\n## Kaynaklar ({len(kays)})\n")
+        L.append("Dis kaynaktan ogrenilenler. Her biri kaynak yollu.\n")
+        for r, k in kays[::-1]:
+            L.append(f"\n**{k.get('bulgu','')}**  \n"
+                     f"*{(r.get('session_ts') or '')[:10]}* · guven: {k.get('guven','?')}  \n"
+                     f"← {k.get('kaynak','')}"
+                     + (f"  \n> {k['alinti']}" if k.get("alinti") else ""))
 
     kars = [(r, k) for r in rows for k in (r.get("kararlar") or [])]
     kars, kd = tekille(kars, lambda x: x[1].get("karar"))

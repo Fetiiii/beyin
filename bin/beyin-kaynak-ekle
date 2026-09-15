@@ -1,0 +1,44 @@
+#!/usr/bin/env python3
+"""beyin kaynak-ekle — dis kaynaktan ogrenilen olguyu store'a yaz.
+
+Karar degil, hipotez degil: dogrulanmis bir olgu ve nereden geldigi.
+Kaynak yolu zorunlu — kaynaksiz bulgu kayda girmez.
+"""
+import sys, os, time, argparse
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from beyin_lib import SESSIONS, append_jsonl, load_sessions, proje_yolu, blog
+
+
+def main():
+    ap = argparse.ArgumentParser(prog="beyin kaynak-ekle")
+    ap.add_argument("proje")
+    ap.add_argument("--bulgu", required=True)
+    ap.add_argument("--kaynak", required=True, help="URL ya da dosya yolu")
+    ap.add_argument("--alinti", default="")
+    ap.add_argument("--guven", default="orta", choices=["kesin", "orta", "zayif"])
+    a = ap.parse_args()
+
+    if not proje_yolu(a.proje):
+        print(f"proje bulunamadi: {a.proje}  (bkz: beyin durum)")
+        return 1
+
+    mevcut = sum(len(r.get("kaynaklar") or []) for r in load_sessions(a.proje))
+    k = {"no": mevcut + 1, "bulgu": a.bulgu, "kaynak": a.kaynak,
+         "alinti": a.alinti, "guven": a.guven}
+    now = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+    rec = {"ts": now, "session_ts": now, "project": a.proje, "harness": "elle",
+           "session": f"elle-{int(time.time())}", "source": "skill", "ok": True,
+           "turns": 0, "ozet": f"Kaynak #{k['no']}: {a.bulgu[:80]}",
+           "kararlar": [], "acik_kalanlar": [], "dokunulan_dosyalar": [],
+           "curutulmus_hipotezler": [], "kaynaklar": [k]}
+    append_jsonl(SESSIONS, rec)
+    blog(f"KAYNAK-EKLE {a.proje} #{k['no']}", "skill.log")
+    print(f"✓ kaydedildi — {a.proje} kaynak #{k['no']}  ({a.guven})")
+    print(f"  {a.bulgu}")
+    print(f"  ← {a.kaynak}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
