@@ -4,7 +4,7 @@
 Skill'in kasitli yazma yolu. Ozetleyicinin otomatik cikardiklarindan farki:
 bu kayit insan onayindan gecmis, numarali ve alintilanabilir.
 """
-import sys, os, time, argparse
+import sys, os, time, uuid, argparse
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from beyin_lib import (SESSIONS, append_jsonl, load_sessions, project_key,
@@ -38,7 +38,7 @@ def main():
 
     rec = {"ts": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
            "session_ts": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
-           "project": a.proje, "harness": "elle", "session": f"elle-{int(time.time())}",
+           "project": a.proje, "harness": "elle", "session": f"elle-{uuid.uuid4().hex[:12]}"   # saniye cozunurlugu yetmiyor: ayni saniyede iki kayit ayni id aliyordu,
            "source": "skill", "ok": True, "turns": 0,
            "ozet": f"Çürütme kaydı #{h['no']}: {a.iddia[:80]}",
            "kararlar": [], "acik_kalanlar": [], "dokunulan_dosyalar": [],

@@ -4,7 +4,7 @@
 Karar degil, hipotez degil: dogrulanmis bir olgu ve nereden geldigi.
 Kaynak yolu zorunlu — kaynaksiz bulgu kayda girmez.
 """
-import sys, os, time, argparse
+import sys, os, time, uuid, argparse
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from beyin_lib import SESSIONS, append_jsonl, load_sessions, proje_yolu, blog
@@ -28,7 +28,7 @@ def main():
          "alinti": a.alinti, "guven": a.guven}
     now = time.strftime("%Y-%m-%dT%H:%M:%S%z")
     rec = {"ts": now, "session_ts": now, "project": a.proje, "harness": "elle",
-           "session": f"elle-{int(time.time())}", "source": "skill", "ok": True,
+           "session": f"elle-{uuid.uuid4().hex[:12]}"   # saniye cozunurlugu yetmiyor: ayni saniyede iki kayit ayni id aliyordu, "source": "skill", "ok": True,
            "turns": 0, "ozet": f"Kaynak #{k['no']}: {a.bulgu[:80]}",
            "kararlar": [], "acik_kalanlar": [], "dokunulan_dosyalar": [],
            "curutulmus_hipotezler": [], "kaynaklar": [k]}
