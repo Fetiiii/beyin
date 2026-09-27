@@ -101,6 +101,34 @@ def kopyala(hedef, kuru):
     return tasinan
 
 
+def sozdizimi_kontrol():
+    """Yayindan once bin/ icindeki her Python dosyasi ayristirilabiliyor mu?
+
+    15 Eylul'de bir duzeltme sirasinda sozdizimi hatasi olan dosya commit edilip
+    yayinlandi. Ucuz kapi: ast.parse. Calistirmaz, sadece ayristirir.
+    """
+    import ast
+    bozuk = []
+    kok = os.path.join(BEYIN, "bin")
+    for ad in sorted(os.listdir(kok)):
+        yol = os.path.join(kok, ad)
+        if not os.path.isfile(yol) or ad.endswith((".pyc", ".log")):
+            continue
+        try:
+            with open(yol, encoding="utf-8") as f:
+                ilk = f.readline()
+                govde = ilk + f.read()
+        except Exception:
+            continue
+        if not (ad.endswith(".py") or "python" in ilk):
+            continue
+        try:
+            ast.parse(govde)
+        except SyntaxError as e:
+            bozuk.append((f"bin/{ad}", f"satir {e.lineno}: {e.msg}"))
+    return bozuk
+
+
 def main():
     ap = argparse.ArgumentParser(prog="beyin yayinla")
     ap.add_argument("--hedef", default=os.path.join(HOME, "beyin-public"))
@@ -113,6 +141,16 @@ def main():
     if not os.path.isdir(os.path.join(a.hedef, ".git")):
         print(f"hedef bir git deposu degil: {a.hedef}")
         return 1
+
+    # Sozdizimi kapisi: bir kez bozuk dosya yayinlandi (15 Eylul).
+    bozuk = sozdizimi_kontrol()
+    if bozuk:
+        print(f"🔴 {len(bozuk)} dosyada sozdizimi hatasi — yayin YAPILMADI:\n")
+        for yol, hata in bozuk:
+            print(f"   {yol}: {hata}")
+        print("\n   Duzelt, sonra tekrar calistir.")
+        return 3
+    print("✅ sozdizimi: bin/ temiz")
 
     terimler = hassas_terimler()
     print(f"── tarama terimleri: {len(terimler)} adet (kendi verinden turetildi)")

@@ -7,9 +7,9 @@ arka plana at ve HEMEN don. Asla beklemez, asla oturumu bozmaz.
 import sys, os, json, time, subprocess
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from beyin_lib import (EVENTS, STATE, project_key, append_jsonl, build_context,
-                       emit_context, touch_live, close_live, consume_devir,
-                       guard_karari, emit_deny)
+from beyin_lib import (EVENTS, STATE, SESSIONS, project_key, append_jsonl,
+                       build_context, emit_context, touch_live, close_live,
+                       consume_devir, guard_karari, emit_deny, mod_oku)
 
 # PreCompact bilerek YOK: "baglam doldu" ile "limit bitiyor" ayni sey degil.
 # Devir notu ELLE cagrilir: beyin devir <proje>
@@ -66,7 +66,9 @@ def main():
     # canli durum: her istemde tazele, oturum bitince sil
     sid = rec.get("session")
     if sid:
-        if event in ("SessionStart", "UserPromptSubmit"):
+        # SubagentStart/PreCompact de "bu oturum calisiyor" demektir:
+        # tek istemle saatlerce suren oturum bayat sayilmasin.
+        if event in ("SessionStart", "UserPromptSubmit", "SubagentStart", "PreCompact"):
             touch_live(proj, sid, harness, cwd, rec.get("prompt"), rec.get("transcript"))
         elif event == "SessionEnd":
             close_live(proj, sid)
@@ -82,34 +84,58 @@ def main():
                 _rec = None
             consume_devir(proj, sid, _rec)
 
-    if event in SUMMARIZE_ON and rec["transcript"]:
+    mod = mod_oku()
+    if event in SUMMARIZE_ON and rec["transcript"] and mod.get("ozet", True):
         spawn_summarizer(rec)
 
-    if event == "SessionEnd":
+    # Kapanis hook'u calismadan biten oturumlari acilista topla (A1).
+    if event == "SessionStart":
+        spawn_arkaplan("beyin-kurtar", [proj], "kurtarma.log")
+
+    if event in ("SessionStart", "SessionEnd"):
         maybe_compile()
 
-    if event in INJECT_ON:
+    # Baglam enjeksiyonu moda bagli: her-olay | oturum (yalniz acilis) | kapali
+    baglam = mod.get("baglam", "her-olay")
+    if event in INJECT_ON and baglam != "kapali" and \
+            not (baglam == "oturum" and event != "SessionStart"):
         emit_context(event, build_context(proj, rec.get("session")))
 
 
-COMPILE_EVERY = 6 * 3600
+COMPILE_MIN = 10 * 60        # iki derleme arasi en az: SessionEnd yagmurunda
+                             # ust uste beyin-derle kosmasin
 
 
 def maybe_compile():
-    """6 saatte bir, arka planda. Ozetleyici bitmeden calisirsa sonraki tur yakalar."""
+    """Zamana degil DEGISIME bagli: store son derlemeden sonra yazildiysa derle.
+
+    Once 6 saatlik sabit aralikti; elle eklenen kayitlar Obsidian'a saatlerce
+    yansimadi (19 Eylul). Alt sinir yalnizca ust uste kosmayi engelliyor.
+    """
     stamp = os.path.join(STATE, "son-derleme")
     try:
-        if os.path.exists(stamp) and time.time() - float(open(stamp).read().strip()) < COMPILE_EVERY:
+        son = float(open(stamp).read().strip()) if os.path.exists(stamp) else 0.0
+        if time.time() - son < COMPILE_MIN:
             return
+        if son and os.path.getmtime(SESSIONS) <= son:
+            return                       # yeni kayit yok, derlemeye gerek yok
     except Exception:
         pass
+    spawn_arkaplan("beyin-derle", [], "derle.log")
+
+
+def spawn_arkaplan(betik, args, log):
+    """Kop ve don. Hook 3 saniyeden once donmek ZORUNDA."""
     here = os.path.dirname(os.path.abspath(__file__))
-    subprocess.Popen([sys.executable, os.path.join(here, "beyin-derle")],
-                     stdin=subprocess.DEVNULL,
-                     stdout=open(os.path.join(STATE, "derle.log"), "a"),
-                     stderr=subprocess.STDOUT,
-                     start_new_session=True, cwd="/tmp",
-                     env=dict(os.environ, BEYIN_NO_CAPTURE="1"))
+    try:
+        subprocess.Popen([sys.executable, os.path.join(here, betik)] + list(args),
+                         stdin=subprocess.DEVNULL,
+                         stdout=open(os.path.join(STATE, log), "a"),
+                         stderr=subprocess.STDOUT,
+                         start_new_session=True, cwd="/tmp",
+                         env=dict(os.environ, BEYIN_NO_CAPTURE="1"))
+    except Exception:
+        pass
 
 
 def spawn_summarizer(rec):

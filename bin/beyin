@@ -9,7 +9,17 @@
   beyin baglam  <proje>          SessionStart'ta enjekte edilen metni goster
   beyin devir   <proje>          devam eden oturumdan devir notu uret
   beyin canli                    su an calisan oturumlar
+  beyin mod [normal|ekonomik|manuel]    baglam/ozet tuketim profili
+  beyin tazelik <proje>                kaydin dayandigi dosyalar degisti mi
+  beyin sonuc <proje> --json <dosya>    ajan kendi oturum kaydini yazar
+  beyin gorev liste <proje> [--hepsi]   acik isler (--hepsi: kapananlar da)
+  beyin gorev ac     <proje> "<is>"     yeni acik is
+  beyin gorev kapat  <proje> <id>       bitti
+  beyin gorev iptal  <proje> <id>       artik gerekmiyor
+  beyin gorev beklet <proje> <id>       sonraya birakildi
+  beyin gorev senkron [proje]           son oturumun acik islerini deftere al
   beyin derle                    markdown gorunumu yeniden uret
+  beyin kurtar [proje] [--liste] kapanmadan biten oturumlari hafizaya al
   beyin doktor                   tani
   beyin yayinla [--kuru]         kodu yayin deposuna tasi (once sizinti tarar)
   beyin skill-bagla <isim>       skill'i iki harness'a da bagla
@@ -41,6 +51,106 @@ def wrap(s, indent=6):
     if line:
         out.append(line)
     return ("\n" + " " * indent).join(out)
+
+
+def cmd_gorev(a):
+    """beyin gorev <altkomut> ..."""
+    from beyin_lib import (gorev_oku, gorev_ac, gorev_durum_degistir,
+                           acik_gorevler, gorev_senkron, project_stats, _roots)
+    alt = a[0] if a else "liste"
+    isaret = {"acik": "[ ]", "beklemede": "[~]", "bitti": "[x]", "iptal": "[-]"}
+
+    if alt == "senkron":
+        # Son N anlamli oturumun acik kalanlarini deftere al (kurulum/tazeleme).
+        # Varsayilan 1: gunluk kullanimda son oturum yeter. Ilk kurulumda
+        # --son 3 gibi bir deger gecmis isleri de toplar.
+        from beyin_lib import load_sessions, anlamli_mi
+        import os as _os
+        kac = 1
+        if "--son" in a:
+            i = a.index("--son")
+            kac = int(a[i + 1]) if len(a) > i + 1 else 1
+            a = a[:i] + a[i + 2:]
+        adlar = [x for x in a[1:] if not x.startswith("-")]
+        pdir = _os.path.expanduser("~/beyin/projeler")
+        projeler = adlar or (sorted(_os.path.splitext(f)[0] for f in _os.listdir(pdir)
+                                    if f.endswith(".md")) if _os.path.isdir(pdir) else [])
+        for p in projeler:
+            anlamlilar = [r for r in load_sessions(p) if anlamli_mi(r)]
+            n = sum(gorev_senkron(p, r) for r in anlamlilar[-kac:])
+            if n:
+                print(f"{p:26} +{n} gorev")
+        print("senkron bitti")
+        return
+
+    proje = a[1] if len(a) > 1 else None
+    if not proje:
+        print("kullanim: beyin gorev <liste|ac|kapat|iptal|beklet|senkron> <proje> ...")
+        return
+
+    if alt == "liste":
+        hepsi = "--hepsi" in a
+        rows = gorev_oku(proje) if hepsi else acik_gorevler(proje)
+        if not rows:
+            print(f"{proje}: acik gorev yok")
+            return
+        rows.sort(key=lambda g: (g.get("durum") != "acik", g.get("son_gorulme") or ""))
+        for g in rows:
+            d = g.get("durum", "acik")
+            tarih = (g.get("kapandi") or g.get("son_gorulme") or "")[:10]
+            print(f"  {g['id']} {isaret.get(d,'[ ]')} {tarih}  {g.get('metin','')}")
+        return
+
+    if alt == "ac":
+        metin = " ".join(a[2:]).strip()
+        if not metin:
+            print('kullanim: beyin gorev ac <proje> "<is>"'); return
+        # Var olan bir id verildiyse yeni gorev acma, kapanani yeniden ac.
+        mevcut = next((g for g in gorev_oku(proje) if g.get("id") == metin), None)
+        if mevcut:
+            g = gorev_durum_degistir(proje, metin, "acik")
+            print(f"{g['id']} yeniden acildi: {g.get('metin','')}")
+            return
+        g = gorev_ac(proje, metin, kaynak="elle")
+        print(f"{g['id']} acildi: {g['metin']}")
+        return
+
+    hedef = {"kapat": "bitti", "iptal": "iptal", "beklet": "beklemede"}.get(alt)
+    if not hedef:
+        print(f"bilinmeyen altkomut: {alt}"); return
+    anahtar = a[2] if len(a) > 2 else None
+    if not anahtar:
+        print(f"kullanim: beyin gorev {alt} {proje} <id>"); return
+    g = gorev_durum_degistir(proje, anahtar, hedef, not_=" ".join(a[3:]) or None)
+    if not g:
+        print(f"bulunamadi: {anahtar}  (bak: beyin gorev liste {proje})")
+        return
+    print(f"{g['id']} -> {g['durum']}: {g.get('metin','')}")
+
+
+def cmd_tazelik(proj):
+    """Kayitlar hangi dosyalara dayaniyordu, o dosyalar degisti mi? (B4)"""
+    from beyin_lib import imza_farki
+    if not proj:
+        print("kullanim: beyin tazelik <proje>"); return
+    rows = [r for r in load_sessions(proj) if r.get("dosya_imza")]
+    if not rows:
+        print(f"{proj}: imzali kayit yok (imza 19 Eylul'den sonraki kayitlarda tutuluyor)")
+        return
+    for r in rows[::-1][:10]:
+        degisen, silinen = imza_farki(r)
+        ts = (r.get("session_ts") or r.get("ts") or "")[:10]
+        n = len(r.get("dosya_imza") or {})
+        if not degisen and not silinen:
+            print(f"[{ts}] taze — {n} dosyanin hicbiri degismemis")
+            continue
+        print(f"[{ts}] ESKIMIS — {n} dosyadan {len(degisen)} degismis, {len(silinen)} silinmis")
+        for y in degisen[:6]:
+            print(f"        degisti: {y}")
+        for y in silinen[:6]:
+            print(f"        yok    : {y}")
+        print(f"        ozet: {wrap(r.get('ozet',''), 14)}")
+        print()
 
 
 def cmd_durum():
@@ -188,9 +298,9 @@ def main():
                 print(f"isci taraf: {d['harness']}{'/' + d['model'] if d.get('model') else ''}"
                       f"{' effort ' + d['effort'] if d.get('effort') else ''}")
                 print("degistirmek icin: beyin isci <claude|codex> [model] [effort]")
-                print("  codex : gpt-6-astra | gpt-5.6-sol | gpt-5.6-terra | gpt-5.6-luna")
+                print("  codex : gpt-6-pro | gpt-6-astra | gpt-6-sol | gpt-6-luna")
                 print("  claude: opus | sonnet | haiku")
-                print("  effort: low | medium | high | xhigh | max")
+                print("  effort: low | medium | high | xhigh | ultra | max")
             else:
                 h = a[1]
                 if h not in ("claude", "codex"):
@@ -231,6 +341,34 @@ def main():
         elif c in ("derle", "doktor"):
             os.execv(sys.executable, [sys.executable,
                      os.path.join(os.path.dirname(os.path.abspath(__file__)), "beyin-" + c)])
+        elif c == "tazelik":
+            cmd_tazelik(a[1] if len(a) > 1 else None)
+        elif c == "mod":
+            from beyin_lib import mod_oku, mod_yaz, PROFILLER
+            if len(a) > 1 and a[1] in PROFILLER:
+                m = mod_yaz(a[1])
+            elif len(a) > 2 and a[1] == "--butce":
+                m = mod_yaz(butce=int(a[2]))
+            elif len(a) > 1:
+                print("profil: " + " | ".join(PROFILLER)); return
+            else:
+                m = mod_oku()
+            print(f"profil   : {m['profil']}")
+            print(f"butce    : {m['butce']} karakter")
+            print(f"baglam   : {m['baglam']}   (her-olay | oturum | kapali)")
+            print(f"otomatik ozet: {'acik' if m['ozet'] else 'KAPALI'}")
+            print(f"kural seti   : {'kisa' if m['kisa_kural'] else 'tam'}")
+            if not m["ozet"]:
+                print("\nNot: manuel modda oturumlar kendiliginden ozetlenmez.")
+                print("Kaydi ajan `beyin sonuc` ile yazar, ya da sonradan `beyin kurtar`.")
+        elif c == "sonuc":
+            os.execv(sys.executable, [sys.executable,
+                     os.path.join(os.path.dirname(os.path.abspath(__file__)), "beyin-sonuc")] + a[1:])
+        elif c == "gorev":
+            cmd_gorev(a[1:])
+        elif c == "kurtar":
+            os.execv(sys.executable, [sys.executable,
+                     os.path.join(os.path.dirname(os.path.abspath(__file__)), "beyin-kurtar")] + a[1:])
         elif c == "skill-bagla":
             ad = a[1]
             src = os.path.expanduser(f"~/beyin/skills/{ad}")

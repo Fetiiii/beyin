@@ -1,0 +1,67 @@
+#!/usr/bin/env python3
+"""beyin kurtar — kapanis hook'u calismadan biten oturumlari hafizaya al.
+
+Codex limite takilinca ya da terminal kapaninca SessionEnd ATESLENMEZ; ozet
+yazilmaz. Bu is kapanisa degil, bir sonraki oturumun acilisina bagli: acilista
+arka planda calisir, dokumu duran ama kaydi olmayan oturumlari ozetler.
+
+Kullanim:
+  beyin kurtar [proje]     — ozetle
+  beyin kurtar --liste     — sadece adaylari goster, model cagirma
+"""
+import sys, os
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from beyin_lib import (kaydet_oturum, summarize_session, blog,
+                       kurtarma_adaylari, kurtarma_isaretle)
+
+MAX_TUR = 3          # tek seferde en fazla kac oturum (model cagrisi pahali)
+
+
+def main():
+    args = [a for a in sys.argv[1:] if a]
+    liste = "--liste" in args
+    proje = next((a for a in args if not a.startswith("-")), None)
+
+    adaylar = kurtarma_adaylari(proje)
+    if liste:
+        if not adaylar:
+            print("kurtarilacak oturum yok.")
+            return 0
+        for a in adaylar:
+            print(f"{a['project']:22} {a['harness']:6} tur={a['turns']:<5} "
+                  f"arac={a['arac']:<5} {a['session'][:13]}")
+        return 0
+
+    if not adaylar:
+        return 0
+    for a in adaylar[:MAX_TUR]:
+        try:
+            rec = summarize_session(a, source="kurtarma")
+        except Exception as e:
+            kurtarma_isaretle(a["session"], f"hata: {type(e).__name__}")
+            blog(f"KURTARMA hata proje={a['project']} {type(e).__name__}: {e}")
+            continue
+        if rec is None:
+            kurtarma_isaretle(a["session"], "kisa")
+            continue
+        if not rec.get("ok"):
+            # Basarisiz denemeyi de isaretle: her oturum acilisinda tekrar
+            # denenirse model cagrisi bosa gider.
+            kurtarma_isaretle(a["session"], "ozet cikmadi")
+            blog(f"KURTARMA ozet cikmadi proje={a['project']} {a['session'][:13]}")
+            continue
+        yeni = kaydet_oturum(rec)
+        kurtarma_isaretle(a["session"], "yazildi")
+        blog(f"KURTARILDI proje={rec['project']} turns={rec['turns']} "
+             f"arac={rec.get('arac')} yeni_gorev={yeni} {a['session'][:13]}")
+        print(f"kurtarildi: {rec['project']} · {rec['turns']} tur · {a['session'][:13]}")
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except Exception as e:
+        blog(f"KURTARMA FATAL {type(e).__name__}: {e}")
+        sys.exit(0)

@@ -33,6 +33,31 @@ def peek_cwd(path, harness, maxlines=6):
     return None
 
 
+def kopya_mi(path, maxlines=40):
+    """Codex Desktop, Claude oturumlarini kendi klasorune KOPYALIYOR
+    ("EXTERNAL SESSION IMPORTED"). Ayni is iki kez iceri alinmasin."""
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            for i, line in enumerate(f):
+                if i > maxlines:
+                    return False
+                if "EXTERNAL SESSION IMPORTED" in line:
+                    return True
+    except Exception:
+        pass
+    return False
+
+
+def altajan_mi(path):
+    """Alt ajan dokumu ayri bir oturum degil; ana oturumun kaydi yeter."""
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            ilk = f.readline()
+        return '"thread_source":"subagent"' in ilk.replace(" ", "")
+    except Exception:
+        return False
+
+
 def discover():
     out = []
     for path in glob.glob(os.path.join(HOME, ".claude/projects/*/*.jsonl")):
@@ -44,6 +69,8 @@ def discover():
         cwd = peek_cwd(path, harness)
         pk = project_key(cwd) if cwd else None
         if not pk:
+            continue
+        if kopya_mi(path) or altajan_mi(path):
             continue
         sid = os.path.basename(path).replace(".jsonl", "")
         jobs.append({"harness": harness, "transcript": path, "project": pk,

@@ -230,8 +230,14 @@ beyin hipotez <proje> [n]       çürütülmüş hipotezler
 beyin ara     <kelime>          her şeyde ara
 beyin canli                     şu an çalışan oturumlar
 beyin baglam  <proje>           açılışta ne enjekte ediliyor
-beyin devir   <proje>           devir notu üret
+beyin devir   <proje>           devir notu üret (canlı ya da yeni kapanmış oturumdan)
 beyin gorevlendir <proje> "..."  alt ajanı o projede çalıştır
+beyin gorev liste  <proje>      açık işler (durumu olan kayıtlar)
+beyin gorev kapat  <proje> <id>  bitti  (ac | iptal | beklet | senkron)
+beyin sonuc   <proje> --json <f>  ajan kendi oturum kaydını yazar
+beyin kurtar  [proje] [--liste]  kapanmadan biten oturumları hafızaya al
+beyin tazelik <proje>           kaydın dayandığı dosyalar değişti mi
+beyin mod [normal|ekonomik|manuel]  bağlam/özet tüketim profili
 beyin hipotez-ekle <proje> ...  çürütülmüş hipotezi elle kaydet
 beyin skill-bagla <isim>        skill'i iki harness'a da bağla
 beyin derle                     markdown görünümünü yenile
@@ -252,6 +258,48 @@ kopyalama hiç yapılmaz.
 
 `ayarlar.md > Yayin taramasi` ile terim eklersin; `- !kelime` yanlış
 pozitifleri eler.
+
+---
+
+## Sonradan ölçülüp değiştirilenler
+
+İlk sürümden sonra gerçek kullanımda çıkan ve **ölçülerek** düzeltilen şeyler.
+Bunları buraya yazıyorum çünkü aynı tuzaklara sen de düşeceksin.
+
+**Oturum kapanmazsa kayıt düşmüyordu.** Limit dolunca ya da terminal kapanınca
+kapanış hook'u hiç çalışmıyor. Bir haftalık iş böyle kayboldu. Çözüm kapanışa
+değil bir sonraki açılışa bağlı: dökümü duran ama hafızada karşılığı olmayan
+oturumlar geriye dönük özetleniyor (`beyin kurtar`). Tekrar deneme defteri
+olmadan bu, her açılışta boşa model çağrısı demek.
+
+**"Kısa oturum" ölçüsü tur sayısı olamaz.** Tek istem verip saatlerce çalışan
+oturum var. 100+ oturum ölçüldü: kısa oturumlar 0–63 araç çağrısı, gerçek iş
+oturumları 195–3644. Eşik o boş banda kondu. Aynı hata canlılık ölçüsünde de
+vardı: "son kullanıcı istemi" yerine dökümün son yazılma zamanı doğru sinyal.
+
+**Açık işler serbest cümle olarak tutulmaz.** Her oturumun özetinden yeniden
+üretilince biten iş listeden düşmüyor, aynı madde birikiyor. Durumu olan görev
+kaydına geçildi; özet yeni görev **açar**, hiçbirini kapatmaz — kapatma bilinçli
+eylem.
+
+**Özeti kim yazar.** İşi yapan ajan ne yaptığını zaten biliyor. `beyin sonuc`
+ile kendi kaydını yazıyor; yazmadıysa otomatik özetleyici devreye giriyor. İki
+katman, biri diğerinin yedeği.
+
+**Alt ajan model belirtilmezse ana ajanın modelinde koşar.** Ölçüldü: yedi alt
+ajanın hepsi en ağır modelde çalışmış, ~9,5M girdi token'ı. Tanım dosyalarına
+(`~/.codex/agents/*.toml`, `~/.claude/agents/*.md`) mekanik iş için hafif model
+yazıldı; aynı gün aynı projede girdi %42 düştü. Prompt ile yönlendirme
+olasılıksal, ayar dosyası değil.
+
+**Dosya okumak için `cat` kullanılmıyor.** Bir oturumda araç çıktısının 384 bin
+karakteri (~96 bin token) ana bağlama girdi; en büyük 11 parçanın hepsi `cat`'ti.
+Harness'ın okuma aracı kırpar, dosyayı takip eder, yazma korumasını isabetli
+kılar.
+
+**Devir notunun dosya listesi modelden gelmez.** Model dosya yolu uydurdu ve
+yarıda kesilmiş testi "çalışıyor" yazdı. O bölüm artık `git status`/`git log`
+çıktısından üretiliyor; anlatı modelden, olgular git'ten.
 
 ---
 

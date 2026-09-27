@@ -77,14 +77,29 @@ def proje_dosyasi(proj):
 
     if son:
         L.append(f"\n## Son durum ({tarih})\n\n{son.get('ozet','')}\n")
-        acik = [a for a in (son.get("acik_kalanlar") or []) if str(a).strip()]
-        if acik:
-            bayat = gun_farki(son.get("session_ts")) > TAZE_GUN
-            baslik = "Acik isler" if not bayat else \
-                     f"Acik isler *(son oturum {int(gun_farki(son.get('session_ts')))} gun once — dogrula)*"
-            L.append(f"### {baslik}\n")
-            for a in acik:
-                L.append(f"- [ ] {a}")
+
+    # Acik isler gorev defterinden gelir (B1): kapatilan is burada gorunmez.
+    from beyin_lib import gorev_oku
+    gorevler = gorev_oku(proj)
+    acik = [g for g in gorevler if g.get("durum") in ("acik", "beklemede")]
+    if acik:
+        acik.sort(key=lambda g: g.get("son_gorulme") or "", reverse=True)
+        L.append(f"\n## Acik isler ({len(acik)})\n")
+        L.append("*Gorev defterinden. Kapatmak icin: "
+                 f"`beyin gorev kapat {proj} <id>`*\n")
+        for g in acik:
+            bekle = " *(beklemede)*" if g.get("durum") == "beklemede" else ""
+            yas = gun_farki(g.get("son_gorulme"))
+            eski_mi = f" — {int(yas)} gundur gorulmedi" if yas > TAZE_GUN else ""
+            L.append(f"- [ ] `{g['id']}` {g.get('metin','')}{bekle}{eski_mi}")
+    kapali = [g for g in gorevler if g.get("durum") in ("bitti", "iptal")]
+    if kapali:
+        kapali.sort(key=lambda g: g.get("kapandi") or "", reverse=True)
+        L.append(f"\n### Kapanan isler ({len(kapali)})\n")
+        for g in kapali[:15]:
+            im = "x" if g.get("durum") == "bitti" else "-"
+            L.append(f"- [{im}] `{g['id']}` {g.get('metin','')} "
+                     f"*({(g.get('kapandi') or '')[:10]})*")
 
     hyps = [(r, h) for r in rows for h in (r.get("curutulmus_hipotezler") or [])]
     hyps, hd = tekille(hyps, lambda x: x[1].get("iddia"))

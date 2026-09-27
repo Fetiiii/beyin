@@ -1,0 +1,107 @@
+#!/usr/bin/env python3
+"""beyin sonuc — ajanin KENDI yazdigi oturum kaydi.
+
+Otomatik ozetleyici oturum kapanisina bagli: kapanmazsa kayit yok, kapansa
+bile modelin dokumden anladigi kadariyla yaziliyor. Isi yapan ajan ise ne
+yaptigini zaten bilir. Bu komut o bilgiyi dogrudan hafizaya yazar.
+
+Otomatik ozet KALDIRILMADI: ajan yazmadiysa o devreye girer. Ajan yazdiysa
+ayni oturum icin model tekrar cagrilmaz.
+
+Kullanim:
+  beyin sonuc <proje> --json <dosya>        (onerilen)
+  beyin sonuc <proje> --ozet "..." [--acik "..."] [--yapildi "..."] [--dosya yol]
+  [--oturum <id>]   oturum kimligi (acilis baglaminda veriliyor)
+
+--json semasi (hepsi istege bagli, ozet zorunlu):
+  {"ozet": "...", "yapilanlar": ["..."], "acik_kalanlar": ["..."],
+   "kararlar": [{"karar":"...","gerekce":"...","kanit":"..."}],
+   "curutulmus_hipotezler": [...], "kaynaklar": [...],
+   "dokunulan_dosyalar": ["yol"]}
+"""
+import sys, os, json, time, argparse
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from beyin_lib import kaydet_oturum, project_key, blog, yankiyi_ele, dosya_imza
+
+ALANLAR = ("yapilanlar", "acik_kalanlar", "kararlar", "curutulmus_hipotezler",
+           "kaynaklar", "dokunulan_dosyalar")
+
+
+def main():
+    ap = argparse.ArgumentParser(prog="beyin sonuc", add_help=False)
+    ap.add_argument("proje", nargs="?")
+    ap.add_argument("--json")
+    ap.add_argument("--ozet")
+    ap.add_argument("--yapildi", action="append", default=[])
+    ap.add_argument("--acik", action="append", default=[])
+    ap.add_argument("--dosya", action="append", default=[])
+    ap.add_argument("--oturum")
+    ap.add_argument("--harness", default=os.environ.get("BEYIN_HARNESS", "ajan"))
+    ap.add_argument("-h", "--help", action="store_true")
+    a = ap.parse_args()
+
+    if a.help or not a.proje:
+        print(__doc__)
+        return 0 if a.help else 1
+
+    data = {}
+    if a.json:
+        try:
+            data = json.load(open(a.json, encoding="utf-8"))
+        except Exception as e:
+            print(f"json okunamadi: {e}")
+            return 1
+        if not isinstance(data, dict):
+            print("json bir nesne olmali")
+            return 1
+    if a.ozet:
+        data["ozet"] = a.ozet
+    if a.yapildi:
+        data.setdefault("yapilanlar", []).extend(a.yapildi)
+    if a.acik:
+        data.setdefault("acik_kalanlar", []).extend(a.acik)
+    if a.dosya:
+        data.setdefault("dokunulan_dosyalar", []).extend(a.dosya)
+
+    if not (data.get("ozet") or "").strip():
+        print("ozet zorunlu: --ozet ya da json icinde 'ozet'")
+        return 1
+
+    rec = {
+        "ts": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+        "session_ts": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+        "project": a.proje,
+        "harness": a.harness,
+        "session": a.oturum or f"ajan-{int(time.time())}",
+        "cwd": os.environ.get("PWD"),
+        "trigger": "ajan",
+        "source": "ajan",
+        "ok": True,
+        "by": a.harness,
+        "turns": 0,
+        "ozet": data["ozet"].strip(),
+    }
+    for k in ALANLAR:
+        v = data.get(k)
+        if isinstance(v, list) and v:
+            rec[k] = v
+
+    imza = dosya_imza(rec.get("cwd"), rec.get("dokunulan_dosyalar"))
+    if imza:
+        rec["dosya_imza"] = imza
+
+    # Ayni yanki filtresi: hafizada zaten duran iddiayi yeniden yazma.
+    rec = yankiyi_ele(a.proje, rec)
+    yeni = kaydet_oturum(rec)
+    blog(f"SONUC (ajan) proje={a.proje} oturum={rec['session'][:13]} yeni_gorev={yeni}")
+    print(f"kaydedildi: {a.proje} · {rec['session'][:13]}"
+          + (f" · {yeni} yeni gorev" if yeni else ""))
+    kapanan = [k for k in ALANLAR if rec.get(k)]
+    if kapanan:
+        print("  alanlar: " + ", ".join(f"{k}={len(rec[k])}" for k in kapanan))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

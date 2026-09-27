@@ -28,7 +28,7 @@ def main():
                     choices=["low", "medium", "high", "xhigh", "max"],
                     help="gorevin agirligina gore; varsayilan `beyin isci`den")
     ap.add_argument("--model", default=None,
-                    help="codex: gpt-6-astra|gpt-5.6-sol|gpt-5.6-luna... / claude: opus|sonnet|haiku")
+                    help="codex: gpt-6-pro|gpt-6-astra|gpt-6-sol|gpt-6-luna / claude: opus|sonnet|haiku")
     ap.add_argument("--sessiz", action="store_true")
     a = ap.parse_args()
 

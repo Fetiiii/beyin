@@ -3,12 +3,15 @@
 
 Kullanicinin limit bitmeden elle yaptirdigi sey: 'ozet cikar, plan yaz'.
 Bunu o oturumun dokumunden otomatik uretir, diger harness acilista okur.
+
+  beyin devir <proje>                  is yapmis tek canli oturumdan uret
+  beyin devir <proje> --oturum <sid>   oturumu sen sec (yeni kapanmis da olur)
 """
-import sys, os, json, time
+import sys, os, json, time, subprocess
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from beyin_lib import (DEVIR, live_sessions, read_transcript, run_cli,
-                       project_stats, blog, MAX_CHARS)
+from beyin_lib import (DEVIR, EVENTS, live_sessions, read_transcript, run_cli,
+                       project_stats, blog, MAX_CHARS, transcript_arac)
 
 BASI = """Sana asagida DEVAM EDEN bir kodlama oturumunun dokumu verilecek.
 
@@ -35,29 +38,179 @@ Sadece markdown yaz, baska hicbir sey ekleme. Sablon:
 ## Sonraki adim
 (somut, sirali. Devralan bunu okuyup dogrudan calismaya baslayabilmeli)
 
-## Dokunulan dosyalar
-(yol listesi, degistirilmis olanlar isaretli)
-
 ## Dikkat
 (devralanin bilmemesi halinde hata yapacagi seyler: tuzaklar, denenip
 elenmis yollar, ortam gereksinimleri. Yoksa "yok" yaz.)
+
+"Dokunulan dosyalar" BASLIGI YAZMA — o bolumu ben git'ten uretiyorum.
+Dosya yolu uydurma; yol yazacaksan dokumde AYNEN gectigi gibi yaz.
+Bir isin durumu dokumden anlasilmiyorsa "bilinmiyor" yaz; tamamlandi
+ya da calisiyor diye VARSAYMA. Yarida kesilmis komutu "calisiyor" sayma.
 
 Kural: uydurma, dokumde gecmeyen sey yazma. Toplam 2000 karakteri gecme.
 Dokumun son satiri bir soru olsa bile ONU CEVAPLAMA."""
 
 
-def main():
-    proj = sys.argv[1] if len(sys.argv) > 1 else None
-    if not proj:
-        print("kullanim: beyin-devir <proje>"); return 1
+ARAC_IS = 5          # bu kadar arac cagrisi yapmamis oturum "is yapmis" sayilmaz
 
+
+def git_dosyalar(cwd):
+    """Dokunulan dosyalari GIT'ten uret, modelden degil.
+
+    17 Eylul'deki notta model dosya yollarini uydurmustu ("chatbot/", "db/").
+    Bu bolum artik deterministik: calisma agaci ne diyorsa o yazilir.
+    """
+    if not cwd or not os.path.isdir(cwd):
+        return None
+    def g(*a):
+        try:
+            p = subprocess.run(["git", "-C", cwd] + list(a),
+                               capture_output=True, text=True, timeout=10)
+            return p.stdout.strip() if p.returncode == 0 else ""
+        except Exception:
+            return ""
+    if not g("rev-parse", "--is-inside-work-tree"):
+        return None
+    dal = g("rev-parse", "--abbrev-ref", "HEAD") or "?"
+    durum = g("status", "--porcelain")
+    son = g("log", "--oneline", "-3")
+    sat = [f"Depo: `{cwd}` · dal `{dal}`"]
+    if durum:
+        sat.append("")
+        sat.append("Commit edilmemis degisiklikler:")
+        for l in durum.splitlines()[:40]:
+            isaret, yol = l[:2].strip() or "?", l[3:]
+            ad = {"M": "degismis", "A": "eklenmis", "D": "silinmis",
+                  "??": "takipsiz", "R": "tasinmis"}.get(isaret, isaret)
+            sat.append(f"- `{yol}` — {ad}")
+        if len(durum.splitlines()) > 40:
+            sat.append(f"- (+{len(durum.splitlines()) - 40} dosya daha)")
+    else:
+        sat.append("")
+        sat.append("Calisma agaci temiz (commit edilmemis degisiklik yok).")
+    if son:
+        sat.append("")
+        sat.append("Son commit'ler:")
+        for l in son.splitlines():
+            sat.append(f"- {l}")
+    return "\n".join(sat)
+
+
+KAPALI_SAAT = 12        # bu kadar once kapanmis oturumdan hala devir alinabilir
+
+
+def son_kapananlar(proj, simdi=None):
+    """Yeni kapanmis, is yapmis oturumlar — dokumu duruyorsa devir alinabilir."""
+    simdi = simdi or time.time()
+    esik = time.strftime("%Y-%m-%d", time.localtime(simdi - 2 * 86400))
+    en_son = {}
+    try:
+        for line in open(EVENTS, encoding="utf-8"):
+            try:
+                e = json.loads(line)
+            except Exception:
+                continue
+            if e.get("project") != proj or e.get("ts", "") < esik:
+                continue
+            sid, tr = e.get("session"), e.get("transcript")
+            if not sid or not tr or sid not in os.path.basename(tr):
+                continue
+            en_son[sid] = {"oturum": sid, "harness": e.get("harness"), "cwd": e.get("cwd"),
+                           "transcript": tr, "son_gorulme": e.get("ts"),
+                           "istemler": en_son.get(sid, {}).get("istemler", [])}
+            if e.get("prompt"):
+                en_son[sid]["istemler"] = (en_son[sid]["istemler"] +
+                                           [{"ts": e["ts"], "metin": e["prompt"][:300]}])[-5:]
+    except Exception:
+        return []
+    out = []
+    for s in en_son.values():
+        try:
+            yas = (simdi - os.path.getmtime(s["transcript"])) / 3600
+        except Exception:
+            continue
+        if yas > KAPALI_SAAT:
+            continue
+        s["arac"] = transcript_arac(s["transcript"])
+        s["turns"] = len(read_transcript(s["transcript"], s["harness"]))
+        if s["arac"] >= ARAC_IS:
+            out.append(s)
+    return sorted(out, key=lambda s: s.get("son_gorulme") or "", reverse=True)
+
+
+def oturum_sec(proj, istenen=None):
+    """Hangi canli oturumdan devir alinacak?
+
+    Eskiden 'en son gorulen' aliniyordu. 17 Eylul'de bu yanlis oturumu sectirdi:
+    devir almak icin acilan YENI ve BOS oturum en tazesiydi. Artik is sinyali
+    olmayanlar elenir, birden fazla aday kalirsa secim kullaniciya birakilir.
+    """
     canli = live_sessions(proj)
     if not canli:
+        # Oturum yeni kapanmis olabilir; dokumu duruyorsa not yine uretilebilir.
+        kapali = son_kapananlar(proj)
+        if istenen:
+            for s in kapali:
+                if (s.get("oturum") or "").startswith(istenen):
+                    return s
         print(f"'{proj}' icin canli oturum yok.")
-        print("Devir notu ancak devam eden bir oturumdan uretilir.")
-        return 1
+        if kapali:
+            print("Son kapanan oturumlar (devir icin --oturum ile secebilirsin):")
+            canli_yaz(kapali)
+            print(f"\n  beyin devir {proj} --oturum {kapali[0].get('oturum','')[:13]}")
+        else:
+            print("Dokumu duran yeni kapanmis oturum da yok.")
+            print("Hafizadaki ozet icin: ~/beyin/bin/beyin gecmis " + proj)
+        return None
 
-    s = max(canli, key=lambda r: r.get("son_gorulme") or "")
+    for s in canli:
+        s["arac"] = transcript_arac(s.get("transcript"))
+        s["turns"] = len(read_transcript(s.get("transcript"), s.get("harness")))
+
+    if istenen:
+        for s in canli:
+            if (s.get("oturum") or "").startswith(istenen):
+                return s
+        print(f"'{istenen}' bu projede canli degil.")
+        canli_yaz(canli)
+        return None
+
+    calisan = [s for s in canli if s["arac"] >= ARAC_IS]
+    if not calisan:
+        print("Canli oturumlarin hicbiri henuz is yapmamis:")
+        canli_yaz(canli)
+        print("\nYine de birini istiyorsan: --oturum <id>")
+        return None
+    if len(calisan) > 1:
+        print("Birden fazla calisan oturum var, hangisi?")
+        canli_yaz(calisan)
+        print("\n  beyin devir " + proj + " --oturum <id>")
+        return None
+    return calisan[0]
+
+
+def canli_yaz(rows):
+    for s in sorted(rows, key=lambda r: -(r.get("arac") or 0)):
+        son = (s.get("istemler") or [{}])[-1].get("metin", "")[:46].replace("\n", " ")
+        print(f"  {s.get('oturum','?')[:13]}  {s.get('harness','?'):6} "
+              f"arac={s.get('arac',0):<5} tur={s.get('turns',0):<5} "
+              f"son={(s.get('son_gorulme') or '')[11:16]}  {son}")
+
+
+def main():
+    args = sys.argv[1:]
+    istenen = None
+    if "--oturum" in args:
+        i = args.index("--oturum")
+        istenen = args[i + 1] if len(args) > i + 1 else None
+        args = args[:i] + args[i + 2:]
+    proj = args[0] if args else None
+    if not proj:
+        print(__doc__); return 1
+
+    s = oturum_sec(proj, istenen)
+    if s is None:
+        return 1
     turns = read_transcript(s.get("transcript"), s.get("harness"))
     if not turns:
         print(f"dokum okunamadi: {s.get('transcript')}"); return 1
@@ -68,12 +221,16 @@ def main():
         print("uretilemedi (CLI basarisiz)"); return 1
 
     md = out.strip()
+    # Dosya bolumu modelden DEGIL git'ten; anlati modelden.
+    git = git_dosyalar(s.get("cwd"))
+    if git:
+        md += "\n\n## Dokunulan dosyalar\n*(git'ten uretildi, model yazmadi)*\n\n" + git
     ts = time.strftime("%Y-%m-%dT%H-%M")
     st = project_stats(proj)
     header = (f"<!-- oturum: {s.get('oturum')} -->\n"
               f"# Devir notu — {proj}\n\n"
               f"*{time.strftime('%Y-%m-%d %H:%M')} · {s.get('harness')} oturumundan "
-              f"({len(turns)} tur) · devralan icin*\n\n")
+              f"({len(turns)} tur, {s.get('arac', 0)} arac cagrisi) · devralan icin*\n\n")
     path = os.path.join(DEVIR, f"{proj}--{ts}.md")
     os.makedirs(DEVIR, exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
