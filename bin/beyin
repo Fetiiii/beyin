@@ -12,7 +12,7 @@
   beyin mod [normal|ekonomik|manuel]    baglam/ozet tuketim profili
   beyin tazelik <proje>                kaydin dayandigi dosyalar degisti mi
   beyin sonuc <proje> --json <dosya>    ajan kendi oturum kaydini yazar
-  beyin gorev liste <proje> [--hepsi]   acik isler (--hepsi: kapananlar da)
+  beyin gorev liste <proje> [--hepsi|--uykuda]   acik isler
   beyin gorev ac     <proje> "<is>"     yeni acik is
   beyin gorev kapat  <proje> <id>       bitti
   beyin gorev iptal  <proje> <id>       artik gerekmiyor
@@ -58,7 +58,7 @@ def cmd_gorev(a):
     from beyin_lib import (gorev_oku, gorev_ac, gorev_durum_degistir,
                            acik_gorevler, gorev_senkron, project_stats, _roots)
     alt = a[0] if a else "liste"
-    isaret = {"acik": "[ ]", "beklemede": "[~]", "bitti": "[x]", "iptal": "[-]"}
+    isaret = {"acik": "[ ]", "beklemede": "[~]", "uykuda": "[z]", "bitti": "[x]", "iptal": "[-]"}
 
     if alt == "senkron":
         # Son N anlamli oturumun acik kalanlarini deftere al (kurulum/tazeleme).
@@ -90,9 +90,17 @@ def cmd_gorev(a):
 
     if alt == "liste":
         hepsi = "--hepsi" in a
-        rows = gorev_oku(proje) if hepsi else acik_gorevler(proje)
+        if "--uykuda" in a:
+            rows = [g for g in gorev_oku(proje) if g.get("durum") == "uykuda"]
+        else:
+            rows = gorev_oku(proje) if hepsi else acik_gorevler(proje)
         if not rows:
-            print(f"{proje}: acik gorev yok")
+            print(f"{proje}: bu filtrede gorev yok")
+        uyuyan = sum(1 for g in gorev_oku(proje) if g.get("durum") == "uykuda")
+        if uyuyan and not hepsi and "--uykuda" not in a:
+            print(f"  ({uyuyan} gorev uykuda — 3 oturumda gosterilip ilgi gormedi: "
+                  f"beyin gorev liste {proje} --uykuda)")
+        if not rows:
             return
         rows.sort(key=lambda g: (g.get("durum") != "acik", g.get("son_gorulme") or ""))
         for g in rows:
@@ -298,7 +306,7 @@ def main():
                 print(f"isci taraf: {d['harness']}{'/' + d['model'] if d.get('model') else ''}"
                       f"{' effort ' + d['effort'] if d.get('effort') else ''}")
                 print("degistirmek icin: beyin isci <claude|codex> [model] [effort]")
-                print("  codex : gpt-6-pro | gpt-6-astra | gpt-6-sol | gpt-6-luna")
+                print("  codex : gpt-6.1-sol | gpt-6-pro | gpt-6-astra | gpt-6-sol | gpt-6-luna")
                 print("  claude: opus | sonnet | haiku")
                 print("  effort: low | medium | high | xhigh | ultra | max")
             else:

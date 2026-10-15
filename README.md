@@ -16,8 +16,9 @@ Sebebi şu: burada işe yarayan şeylerin çoğu kod değil, **birinin gerçek
 - Neyin "proje" sayılacağı — benimkinde `~/projeler/<x>`, ama bir kökün
   altındaki her klasörün ayrı proje olduğu bir istisna var, çünkü orada
   paralel yürüyen bağımsız araştırma bahisleri vardı
-- Hangi dosyaların korunacağı — `data/` ve `manifests/` kilitli, `results/`
-  ve `outputs/` serbest, çünkü ilki girdi ikincisi üretilen
+- Hangi dosyaların korunacağı — başta `data/` ve `manifests/` kilitliydi;
+  kabuk komutlarında 292 yanlış engelleme üretince kaldırıldı. Bugün yalnız
+  hafızanın kendisi ve aracın kodu korunuyor. Senin eşiğin farklı olabilir
 - Çürütülmüş hipotez kaydının şeması — sahibinin makalesindeki
   `§6 Çürütülen hipotezler` tablosundan çıkarıldı, standart bir "negative
   results" bölümünden değil
@@ -232,7 +233,7 @@ beyin canli                     şu an çalışan oturumlar
 beyin baglam  <proje>           açılışta ne enjekte ediliyor
 beyin devir   <proje>           devir notu üret (canlı ya da yeni kapanmış oturumdan)
 beyin gorevlendir <proje> "..."  alt ajanı o projede çalıştır
-beyin gorev liste  <proje>      açık işler (durumu olan kayıtlar)
+beyin gorev liste  <proje>      açık işler (--uykuda: 3 oturumda ilgi görmeyenler)
 beyin gorev kapat  <proje> <id>  bitti  (ac | iptal | beklet | senkron)
 beyin sonuc   <proje> --json <f>  ajan kendi oturum kaydını yazar
 beyin kurtar  [proje] [--liste]  kapanmadan biten oturumları hafızaya al
@@ -300,6 +301,30 @@ kılar.
 **Devir notunun dosya listesi modelden gelmez.** Model dosya yolu uydurdu ve
 yarıda kesilmiş testi "çalışıyor" yazdı. O bölüm artık `git status`/`git log`
 çıktısından üretiliyor; anlatı modelden, olgular git'ten.
+
+**Okurken tekilleştirmek kayıt yuttu.** Kapanış hook'u bazen iki kez
+tetiklendiği için aynı oturumun kayıtları okurken tekilleştiriliyordu. Ajanın aynı
+oturumda yazdığı birden fazla kayıt da "kopya" sanıldı — oysa hepsi artımlıydı
+(131 ardışık kaydın hiçbiri bir öncekini kapsamıyordu). 345 karar ve 37 çürütülmüş
+hipotez görünmez oldu. Tekilleştirme artık yalnız otomatik özetlerde, onlarda da
+eski kaydın bulguları yenisine katılıyor. Ders: "kopya" tanımı kaynağa göre değişir.
+
+**Tek bir bozuk kayıt bütün görünümü durdurdu.** Bir ajan kaynak listesine düz
+metin yazdı; derleyici 9 gün her çalışmada çöktü ve tanı aracı bunu görmedi.
+Okurken şekil düzeltiliyor, tanı aracı son derlemenin sonucuna bakıyor.
+
+**Açık işler: sorun sayı değil görünürlüktü.** Açılış en son 12 görevi
+gösteriyordu; açık görevlerin %78–94'ü hiçbir ajanın önüne çıkmıyordu. Ajanlar
+gördüğünü kapatıyor, görmediğini kapatamaz. Oluşturma sınırı denendi ve geri
+alındı (gerçek işi de kesiyordu). Yerine rotasyon: önce son oturumun görevleri,
+sonra sırası gelen eskiler; üç oturumda gösterilip ilgi görmeyen "uykuya" geçer —
+silinmez, geri alınabilir.
+
+**Koruma için kabuk sezgiseli güvenilmez.** Aracın kendi kodunu kabuk
+sezgiseliyle korumayı denedik; ajanların gerçek komutlarıyla tekrar ettiğimizde
+764 komutun 241'ini (beyin'i *çalıştıran* komutları) engelleyecekti. Kesin
+mekanizmalarla (Write/Edit ve yama başlıkları) koruyunca yanlış pozitif sıfıra
+indi. Sentetik test yetmedi; gerçek komut tekrarı yakaladı.
 
 ---
 

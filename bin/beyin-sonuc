@@ -22,7 +22,7 @@ Kullanim:
 import sys, os, json, time, argparse
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from beyin_lib import kaydet_oturum, project_key, blog, yankiyi_ele, dosya_imza
+from beyin_lib import kaydet_oturum, project_key, blog, yankiyi_ele, dosya_imza, sekil_duzelt
 
 ALANLAR = ("yapilanlar", "acik_kalanlar", "kararlar", "curutulmus_hipotezler",
            "kaynaklar", "dokunulan_dosyalar")
@@ -86,6 +86,10 @@ def main():
         v = data.get(k)
         if isinstance(v, list) and v:
             rec[k] = v
+
+    # Alan seklini yazmadan once duzelt: duz metin kaynak/karar butun okuyuculari
+    # cokertiyordu (7 Ekim, derleyici 9 gun durdu).
+    rec = sekil_duzelt(rec)
 
     imza = dosya_imza(rec.get("cwd"), rec.get("dokunulan_dosyalar"))
     if imza:

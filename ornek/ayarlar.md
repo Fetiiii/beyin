@@ -27,15 +27,27 @@ uyarısı değil, harness seviyesinde engel.
 Satır bir klasör adıysa yolun herhangi bir bileşeni o adsa eşleşir.
 `*` içeriyorsa dosya adına glob uygulanır.
 `~/` ya da `/` ile başlıyorsa mutlak yol öneki sayılır.
+`arac:` ile başlıyorsa yalnız kesin mekanizmalarla korunur (Write/Edit aracı ve
+yama başlıkları), kabuk komutu sezgiseliyle değil.
 
-- data
-- datasets
-- manifests
-- archives
-- mlruns
-- checkpoints
-- *.sha256
 - ~/beyin/store
 - ~/beyin/events.jsonl
+- arac: ~/beyin/bin
+- arac: ~/beyin/skills
+- arac: ~/beyin/hooks
 
-*`results/` ve `outputs/` bilerek listede yok: onlar üretilen şeyler.*
+### Veri setlerini korumak istersen — önce bunu oku
+
+İlk sürümde `data`, `datasets`, `manifests`, `*.sha256`, `*frozen*` düz desen
+olarak buradaydı. İki ayda **292 engelleme** üretti, büyük kısmı yanlış pozitif:
+`hashlib.sha256` çağrısı `*.sha256`'ya, bir HuggingFace indirme URL'si
+(`.../datasets/...`) `datasets`'e takıldı; `./data/` geçen her `>` içeren komut
+engellendi. Sonunda kaldırıldı.
+
+Yine de istersen `arac:` önekiyle ekle: Write/Edit ile o klasöre yazmayı engeller,
+kabuk komutlarına karışmaz.
+
+    - arac: data
+    - arac: manifests
+
+Gerçek kilit dosya sisteminde durur: `chmod -w` ya da `chattr +i`.

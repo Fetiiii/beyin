@@ -92,6 +92,15 @@ def proje_dosyasi(proj):
             yas = gun_farki(g.get("son_gorulme"))
             eski_mi = f" — {int(yas)} gundur gorulmedi" if yas > TAZE_GUN else ""
             L.append(f"- [ ] `{g['id']}` {g.get('metin','')}{bekle}{eski_mi}")
+    uyuyan = [g for g in gorevler if g.get("durum") == "uykuda"]
+    if uyuyan:
+        uyuyan.sort(key=lambda g: g.get("uyudu") or "", reverse=True)
+        L.append(f"\n### Uykuda — gozden gecir ({len(uyuyan)})\n")
+        L.append("*3 farkli oturumda gosterildi, kimse kapatmadi ya da anmadi. Bitmis "
+                 f"olabilir. Hala gecerliyse `beyin gorev ac {proj} <id>`, bittiyse "
+                 f"`beyin gorev kapat {proj} <id>`.*\n")
+        for g in uyuyan[:40]:
+            L.append(f"- [ ] `{g['id']}` {g.get('metin','')} *(uyudu {(g.get('uyudu') or '')[:10]})*")
     kapali = [g for g in gorevler if g.get("durum") in ("bitti", "iptal")]
     if kapali:
         kapali.sort(key=lambda g: g.get("kapandi") or "", reverse=True)

@@ -73,5 +73,31 @@ def main():
     n = sum(len(os.listdir(os.path.join(live, d))) for d in os.listdir(live)) if os.path.isdir(live) else 0
     satir("canli oturum", True, f"{n} tane")
 
+    # Derleyici 6-15 Ekim arasi her calismada coktu, doktor yine de yesil
+    # gosterdi (yalniz zaman damgasina bakiyordu). Son kosunun sonucuna bak.
+    dl = f"{STATE}/derle.log"
+    try:
+        son = [l for l in open(dl, encoding="utf-8", errors="replace").read().splitlines() if l.strip()][-6:]
+        coktu = any("Error" in l or "Traceback" in l for l in son) and not any("derlendi" in l.lower() for l in son[-2:])
+        satir("derleyici son kosu", not coktu, "COKTU" if coktu else "temiz",
+              f"bak: {dl}" if coktu else "")
+    except Exception:
+        pass
+
+    # Kod klasorlerinde commit edilmemis degisiklik: hook disi bir oturum (ornek:
+    # ~/beyin'de acilmis devredilmis is, 12 Ekim) koda dokunmus olabilir. Yayindan
+    # once gozden gecirilmeli; `beyin yayinla` bin/'i public depoya tasir.
+    try:
+        out = subprocess.run(["git", "-C", BEYIN, "status", "--porcelain", "--",
+                              "bin", "skills", "hooks"], capture_output=True, text=True,
+                             timeout=10).stdout
+        dosyalar = [l[3:] for l in out.splitlines() if l.strip()]
+        satir("kod klasoru temiz", not dosyalar,
+              "commit edilmemis degisiklik yok" if not dosyalar else
+              f"{len(dosyalar)} dosya: {', '.join(dosyalar[:3])}",
+              "git -C ~/beyin diff -- bin skills hooks" if dosyalar else "")
+    except Exception:
+        pass
+
 if __name__ == "__main__":
     main()
